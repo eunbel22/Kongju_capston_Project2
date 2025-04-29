@@ -113,7 +113,7 @@ def generate_answer_ollama(prompt):
 # --- 메인 실행 흐름 ---
 if __name__ == "__main__":
     # 크롤링된 공주대학교 데이터 로드
-    with open("kongju_data.json", "r", encoding="utf-8") as f:
+    with open("capston_04_29/kongju_data.json", "r", encoding="utf-8") as f:
         kongju_data = json.load(f)
 
     # 공주대학교 데이터에서 키워드 추출
