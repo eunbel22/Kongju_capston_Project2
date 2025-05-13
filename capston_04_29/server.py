@@ -1,4 +1,5 @@
 # server.py
+#서버랑 연결해서 테스트용
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -56,3 +57,8 @@ def ask_question(req: QuestionRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+#가상 환경으로 이동 후 cd를 사용해서 server.py파일이 있는 곳으로  이동후 uvicorn server:app --reload를 입력하면 됨
