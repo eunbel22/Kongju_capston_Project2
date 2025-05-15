@@ -1,0 +1,29 @@
+crawlingall.py파일로 크롤링을 해서 merged_results.json이 생기고 나서
+
+1. kongju_data.json 로드
+2. all_text 생성 (모든 content 합치기)
+
+3. [text_utils.py]
+   - extract_keywords() → 키워드 추출
+
+4. [data_loader.py]
+   - 문단(paragraphs) + 임베딩(paragraph_embeddings) 불러오기
+     (없으면 새로 생성)
+
+5. [search_utils.py]
+   - build_faiss_index() → 문단 임베딩으로 FAISS 인덱스 구축
+
+6. [llm_utils.py]
+   - load_llm() → LLM 모델 준비
+7. [embedding_utils.py]
+   - load_embed_model() → 질문 임베딩용 모델 준비
+
+8. [main loop]
+   - 사용자 입력 받기
+   - [search_utils.py] search_similar_paragraph() → 가장 비슷한 문단 찾기
+   - [llm_utils.py] generate_answer_ollama() → 답변 생성
+   - 결과 출력
+
+
+
+  rag_system.py만 실행 버튼 누르면 됨
