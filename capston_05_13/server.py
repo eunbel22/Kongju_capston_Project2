@@ -10,12 +10,12 @@ from llm_utils import generate_answer_ollama
 app = FastAPI()
 
 # 데이터 로드
-with open("merged_results.json", "r", encoding="utf-8") as f:
+with open("split_results.json", "r", encoding="utf-8") as f:
     data = json.load(f)["results"]
 paragraphs = [entry["content"] for entry in data]
 
 # 임베딩 및 인덱스 준비
-print("[1] 문단 로드 완료:", len(paragraphs), "개")
+print("[1] 문장 로드 완료:", len(paragraphs), "개")
 index, vectorizer = build_faiss_index(paragraphs)
 print("[2] FAISS 인덱스 구축 완료")
 
