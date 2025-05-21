@@ -1,0 +1,10 @@
+필요한 파일
+data_loader.py
+embedding_utils.py
+llm_utils.py
+search_utils.py
+sendserver.py
+split_results.json
+text_utils.py
+requirements.txt-> 여기에 패키지 다운로드 받는 방법 있음
+

@@ -13,12 +13,23 @@ def build_faiss_index(paragraphs):
 
     return index, vectorizer
 
-def search_similar_paragraph(query, index, vectorizer, paragraphs, k=5):
+def search_similar_paragraph(query, index, vectorizer, paragraphs, k=5, raw_k=20):
     query_vec = vectorizer.transform([query]).toarray().astype('float32')
-    D, I = index.search(query_vec, k)
+
+    # 후보 문장 많이 확보
+    D, I = index.search(query_vec, raw_k)
 
     results = []
+    seen = set()
+
     for idx in I[0]:
         if idx < len(paragraphs):
-            results.append(paragraphs[idx])
+            para = paragraphs[idx]
+            if para not in seen:
+                results.append(para)
+                seen.add(para)
+        if len(results) == k:
+            break
+
     return results
+
