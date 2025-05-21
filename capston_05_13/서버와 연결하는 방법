@@ -8,3 +8,20 @@ split_results.json
 text_utils.py
 requirements.txt-> 여기에 패키지 다운로드 받는 방법 있음
 
+가상현실 키기
+.\.venv\Scripts\activate
+
+sendserver.py가 있는 곳으로 cd를 사용해서 이동하기
+
+uvicorn sendserver:app -host 0.0.0.0 --port 8000
+
+웹사이트 들어가는 방법
+ipconfig입력 후
+와이파이 IPv4 주소를 입력하기 + :8000
+그리고 /docs를 뒤에 붙이면 화면이 출력됨
+
+즉 웹사이트 주소는
+ex) 192.168.0.13:8000/docs
+
+
+만약 보안으로 막히면 https에서 s를 뺀 http로 하면 해결됨
