@@ -1,0 +1,9 @@
+ai_server.py: FastAPI 서버 및 라우팅 담당
+
+data_utils.py: 데이터 및 인덱스 처리
+
+embedding_utils.py: 임베딩 처리
+
+llm_utils.py: LLM 호출 처리
+
+chat_utils.py: 인삿말, 유사문단 검색 등 로직 담당
