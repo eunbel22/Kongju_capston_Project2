@@ -29,27 +29,6 @@ LOG_FOLDER = os.path.join(PROJECT_ROOT, "server", "logs")
 os.makedirs(LOG_FOLDER, exist_ok=True)
 
 
-# 요청/응답 모델 정의
-class ChatMessage(BaseModel):
-    role: str  # "user" 또는 "assistant"
-    content: str
-
-
-class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    model: str = "mistral"
-    stream: bool = False
-
-
-class ChatResponse(BaseModel):
-    response: str
-    model: str
-    created_at: str
-
-
-# Ollama 설정
-OLLAMA_URL = "http://localhost:11434"
-
 
 # RAG 시스템 클래스
 class RAGSystem:
@@ -577,4 +556,3 @@ if __name__ == "__main__":
         workers=1,  # GPU 메모리 절약을 위해 단일 워커
         log_level="info"
     )
-
