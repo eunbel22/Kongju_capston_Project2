@@ -6,6 +6,7 @@ from embedding_utils import embed_texts
 from nltk import FreqDist
 from konlpy.tag import Okt
 
+
 PREDEFINED_RESPONSES = {
     "안녕": "안녕하세요! 저는 공주대학교 AI 도우미, 포티(Porty)입니다 😊",
     "하이": "하이~ 반가워요! 저는 포티예요. 공주대학교에 대해 궁금한 게 있나요?",
@@ -67,6 +68,7 @@ def build_prompt(user_input, matched_paragraphs):
 
 okt = Okt()
 
+'''
 def extract_keywords(text, top_n=30):
     """
     명사 기반 키워드 추출
@@ -74,6 +76,28 @@ def extract_keywords(text, top_n=30):
     words = okt.nouns(text)
     freq_dist = FreqDist(words)
     return [word for word, freq in freq_dist.most_common(top_n)]
+'''
+
+
+def extract_keywords(text, top_n=30):
+    """
+    형태소 분석 결과에서 명사(Noun)와 숫자(Number)만 추출한 뒤,
+    길이 2 이상인 단어를 대상으로 빈도 순으로 상위 top_n개를 반환합니다.
+    """
+    # 1) 형태소 분석 → (단어, 품사) 튜플 목록 얻기
+    pos_pairs = okt.pos(text, norm=True, stem=True)
+
+    # 2) 명사(Noun) 또는 숫자(Number)만 필터링, 길이 >= 2
+    cands = []
+    for word, tag in pos_pairs:
+        if tag in ("Noun", "Number") and len(word) >= 2:
+            cands.append(word)
+
+    # 3) 빈도 분석
+    freq_dist = FreqDist(cands)
+
+    # 4) 가장 빈도가 높은 top_n개 단어 리스트로 반환
+    return [word for word, _ in freq_dist.most_common(top_n)]
 
 
 def save_log(
