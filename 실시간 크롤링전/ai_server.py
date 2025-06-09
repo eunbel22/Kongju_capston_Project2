@@ -4,8 +4,6 @@ import os
 import json
 import re
 import numpy as np
-from datetime import datetime
-import httpx
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import List
@@ -20,7 +18,7 @@ from embedding_utils import load_embed_model, embed_texts
 from llm_utils import generate_answer_ollama
 from data_utils import load_paragraphs, prepare_faiss
 
-app = FastAPI(title="공주대학교 AI 서버", version="1.0.0", debug=True)
+app = FastAPI(title="공주대학교 AI 서버", version="1.0.0")
 
 # ── 파일 경로 설정 ─────────────────────────────────────────────────────────────
 PROJECT_ROOT   = os.path.dirname(os.path.abspath(__file__))
@@ -73,9 +71,6 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
 
-CRAWL_BASE_URL = "http://127.0.0.1:8000"  # uvicorn realtime_crawling:app 으로 띄운 서버
-
-
 # ── API 엔드포인트 ─────────────────────────────────────────────────────────────
 @app.post("/api/chat")
 async def chat(request: Request, body: ChatRequest):
@@ -96,107 +91,6 @@ async def chat(request: Request, body: ChatRequest):
     small = is_small_talk(user_message)
     if small:
         return {"response": small}
-
-
-    # “공주대학교에 대해 알려줘” 요청 처리
-    if "공주대학교에 대해 알려줘" in user_message:
-        intro = (
-            "안녕하세요! 공주대학교에 대해 알려드릴게요 😊\n\n"
-            "• 설립 연도 및 유형\n"
-            "  – 1948년 ‘공주사범학교’로 개교\n"
-            "  – 1979년 종합대학으로 승격된 국립 종합대학교\n\n"
-            "• 캠퍼스 구성\n"
-            "  – 공주캠퍼스(본교): 인문·사회·자연과학 계열\n"
-            "  – 천안캠퍼스: 공과대학(기계·전기·화학공학 등)\n"
-            "  – 예산캠퍼스: 생명과학·산림자원 분야\n\n"
-            "• 주요 학부·대학원\n"
-            "  – 인문사회과학대학, 자연과학대학, 공과대학, 사범대학, 예술대학 등\n"
-            "  – 석·박사 통합과정 및 특수대학원 운영\n\n"
-            "• 연구역량 및 시설\n"
-            "  – 국책 과제 수행, LINC+ 산학협력사업 참여\n"
-            "  – 첨단 실험·연구시설(공동실험관, 첨단세라믹연구소 등)\n\n"
-            "• 학생·교류 프로그램\n"
-            "  – 약 1만 5천명 재학생, 다국적 교환학생(30여개국)\n"
-            "  – 창업보육센터·취창업지원센터 운영\n\n"
-            "• 캠퍼스 라이프\n"
-            "  – 중앙도서관, 학생식당, 기숙사, 동아리, 체육관 등\n\n"
-            "더 궁금하신 점이 있으면 언제든 질문해주세요!"
-        )
-        return {"response": intro}
-
-
-
-    # 메뉴/식단 질문일 때
-    if any(k in user_message for k in ("메뉴", "식단", "식당", "점심", "저녁", "아침")):
-        # 캠퍼스 결정
-        campus = "cheonan"
-
-        mapping = {
-            "천안": "cheonan",
-            "드림": "dream",
-            "예산": "yesan",
-            "은행사": "ehh",
-            "홍익사": "ehh",
-            "해오름": "ehh",
-            "비전": "VB",
-            "블룸": "VB",
-        }
-        # 먼저 한글 키워드로 체크
-        for kr, en in mapping.items():
-            if kr in user_message:
-                campus = en
-                break
-        else:
-            # 한글 키워드가 없으면 영어 코드로 체크
-            for code in mapping.values():
-                if code in user_message.lower():
-                    campus = code
-                    break
-
-
-        # 디버그: 캠퍼스가 뭘로 잡혔는지 터미널에 출력
-        print(f"[DEBUG] 메뉴/식단 감지 → campus='{campus}', user_message='{user_message}'")
-
-
-        # 크롤러 호출
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                resp = await client.get(
-                    f"{CRAWL_BASE_URL}/crawl/{campus}",
-                    timeout=30.0  # read/connect 모두 30초로 연장
-                )
-                resp.raise_for_status()
-                crawl_data = resp.json()
-                print(f"[DEBUG] 크롤러 응답 데이터 크기: {len(crawl_data.get('meal', []))}")
-
-            except Exception as e:
-                # 예외 종류와 메시지를 모두 찍어 줍니다
-                print("[ERROR] 크롤러 호출 중 예외 발생!", repr(e))
-                return {"response": f"실시간 식단 정보 조회 중 오류 발생: {e}"}
-
-        # 오늘 날짜 문자열
-        today = datetime.now().strftime("%m월 %d일")
-
-        # 오늘 식단 찾기
-        today_meal = next(
-            (m for m in crawl_data.get("meal", [])
-               if today in m.get("date","").strip()),
-            None
-        )
-
-        if not today_meal:
-            return {"response": f"{campus.capitalize()} 캠퍼스 식단 정보가 준비되지 않았습니다."}
-
-        # 응답 생성
-        answer = (
-            f"{campus.capitalize()} 캠퍼스 오늘({today}) 식단 정보입니다:\n\n"
-            f"☀ 아침: {today_meal.get('breakfast') or '정보 없음'}\n"
-            f"🌤 점심: {today_meal.get('lunch')     or '정보 없음'}\n"
-            f"🌙 저녁: {today_meal.get('dinner')    or '정보 없음'}"
-        )
-        return {"response": answer}
-
-
 
     # 5) 쿼리 임베딩 계산
     q_emb = embed_texts([user_message], tokenizer, model)[0]

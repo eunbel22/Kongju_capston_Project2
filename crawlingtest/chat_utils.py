@@ -62,6 +62,7 @@ def build_prompt(user_input, matched_paragraphs):
 [관련 문단]
 {combined_context}
 
+
 {policy_text}
 
 [질문]
