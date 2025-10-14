@@ -1,0 +1,52 @@
+# ============================================
+# 공주대학교 AI 챗봇 프로젝트 Requirements
+# Qwen 2.5 기반 하이브리드 RAG 시스템
+# ============================================
+
+# ── 웹 프레임워크 ──
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.6
+
+# ── AI/ML 핵심 라이브러리 ──
+# Transformers & PyTorch
+transformers==4.57.0
+torch==2.8.0
+accelerate==1.10.1
+bitsandbytes==0.48.1
+
+# Sentence Transformers (임베딩)
+sentence-transformers==5.1.1
+
+# ── RAG & 벡터 검색 ──
+faiss-cpu==1.9.0.post1
+numpy==2.3.3
+
+# ── 한국어 NLP ──
+konlpy==0.6.0
+nltk==3.9.1
+
+# ── 크롤링 & 웹 스크래핑 ──
+beautifulsoup4==4.12.3
+selenium==4.27.1
+chromedriver-autoinstaller==0.6.4
+requests==2.32.5
+
+# ── 데이터 처리 ──
+pandas==2.2.3
+scikit-learn==1.6.1
+
+# ── HTTP 클라이언트 ──
+httpx==0.28.1
+
+# ── 유틸리티 ──
+python-multipart==0.0.20
+python-dotenv==1.0.1
+tqdm==4.67.1
+
+# ── 파일 처리 ──
+pyyaml==6.0.3
+safetensors==0.6.2
+
+# ── 로깅 & 모니터링 ──
+psutil==7.1.0
