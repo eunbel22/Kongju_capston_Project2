@@ -7,6 +7,9 @@ venv\Scripts\activate
 
 cd ai_file
 
+# 통합 서버 시작 (AI 서버 + 크롤링 서버)
+python start_server.py
+#개별 서버 실행
 uvicorn ai_server:app --host 127.0.0.1 --port 8000 --reload
 
 
@@ -22,3 +25,10 @@ chat 실행 예시
 
 # venv 비활성화
 deactivate
+
+
+# 새 터미널 창에서 Ollama 서버 실행
+ollama serve
+
+# 그리고 EEVE-Korean 모델 다운로드 (처음 한 번만)
+ollama pull EEVE-Korean-Instruct-10.8B-v1.0

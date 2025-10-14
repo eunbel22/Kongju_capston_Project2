@@ -3,7 +3,6 @@ import httpx
 import json
 
 # 모델 이름 수정
-#LLM_MODEL_NAME = 'llama3'
 LLM_MODEL_NAME = 'mistral'
 
 
@@ -34,11 +33,11 @@ def generate_answer_ollama(prompt):
             "POST",
             "http://localhost:11434/api/generate",
             json={
-                "model": "mistral",
+                "model": "EEVE-Korean",
                 "prompt": friendly_prompt,
                 "stream": True
             },
-            timeout=120.0
+            timeout=300.0
         ) as response:
             result = ""
             for line in response.iter_lines():

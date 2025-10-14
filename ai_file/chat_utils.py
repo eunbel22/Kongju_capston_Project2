@@ -1,96 +1,205 @@
-# 📁 chat_utils.py
+import difflib
 import os
 from datetime import datetime
+import numpy as np
 from embedding_utils import embed_texts
+from nltk import FreqDist
+from konlpy.tag import Okt
+import json
 
-PREDEFINED_RESPONSES = {
-    "안녕": "안녕하세요! 저는 공주대학교 AI 도우미, 포티(Porty)입니다 😊",
-    "하이": "하이~ 반가워요! 저는 포티예요. 공주대학교에 대해 궁금한 게 있나요?",
-    "안녕하세요": "네, 안녕하세요! 공주대학교에 대해 무엇을 도와드릴까요?",
-    "잘 지냈어": "네! 포티는 항상 대기 중이에요 😊 무엇이 궁금하신가요?",
-    "이름이 뭐야": "제 이름은 포티(Porty)입니다. 공주대학교에 대해 무엇이든 알려드릴게요!",
-    "누구야": "저는 공주대학교 정보를 알려주는 AI 포티예요.",
-    "고마워": "별말씀을요! 더 궁금한 게 있으면 언제든지 물어보세요 🙌",
-    "감사": "감사합니다! 도움이 되었다니 기쁘네요 :)",
-    "수고했어": "감사합니다! 포티는 언제나 도와드릴 준비가 되어 있어요.",
-    "잘했어": "칭찬 감사합니다! 더 정확하게 답변할 수 있도록 노력할게요.",
-    "바보": "포티는 아직 많이 배우는 중이에요 😅 더 나은 답변을 위해 노력할게요!",
-    "심심해": "그럴 땐 공주대학교의 다양한 동아리나 행사 정보를 찾아보는 건 어때요?",
-    "재밌는 이야기": "음... 포티는 주로 공주대학교 정보에 집중하고 있지만, 궁금한 게 있다면 도와드릴게요!",
-    "무슨 일 해": "저는 공주대학교에 대한 정보와 도움을 드리는 챗봇, 포티예요!",
-    "포티": "네! 포티가 여기 있어요 😊 무엇이 궁금하신가요?",
-    "도와줘": "물론이죠! 공주대학교에 대해 궁금한 걸 말씀해 주세요.",
-    "메뉴 알려줘": "식단표를 원하시는 건가요? 어떤 캠퍼스 식단이 궁금하신가요?",
+# 동의어 사전 로드
+SYNONYMS = {
+    "공주대학교": ["공주대"],
+    "공주대": ["공주대학교"]
 }
 
-def is_small_talk(user_input):
-    for key in PREDEFINED_RESPONSES:
-        if key in user_input.lower():
-            return PREDEFINED_RESPONSES[key]
+def replace_synonyms(text):
+    for key, syns in SYNONYMS.items():
+        for syn in syns:
+            if syn in text:
+                text = text.replace(syn, key)
+    return text
+
+
+
+# 프로젝트 구조에 따라 경로 조정
+SMALL_TALK_PATH = os.path.join(os.path.dirname(__file__), "small_talk.json")
+
+# 1) JSON에서 매핑 로드
+try:
+    with open(SMALL_TALK_PATH, "r", encoding="utf-8") as f:
+        SMALL_TALK_RESPONSES = json.load(f)
+except Exception as e:
+    print(f"[chat_utils] small_talk.json 로드 실패: {e}")
+    SMALL_TALK_RESPONSES = {}
+
+def is_small_talk(user_input: str) -> str | None:
+    """
+    1) 가장 먼저 키워드(키)에 substring 매칭을 시도합니다.
+    2) 없으면 difflib.get_close_matches로 유사한 키를 찾아봅니다.
+    3) 유사도가 cutoff 이상인 경우 해당 응답을 반환.
+    """
+    text = replace_synonyms(user_input.strip())
+
+
+    # 1) 부분 매칭
+    for key, resp in SMALL_TALK_RESPONSES.items():
+        if key in text:
+            return resp
+
+    # 2) 유사도 매칭
+    #    keys 목록 중에서 가장 비슷한 키 하나 찾기
+    candidates = difflib.get_close_matches(text, SMALL_TALK_RESPONSES.keys(),
+                                           n=1, cutoff=0.6)
+    if candidates:
+        return SMALL_TALK_RESPONSES[candidates[0]]
+
     return None
 
-def search_similar_paragraphs(query, paragraphs, tokenizer, model, index, top_k=3):
-    query_embedding = embed_texts([query], tokenizer, model)[0].reshape(1, -1)
-    _, indices = index.search(query_embedding, top_k)
-    return [paragraphs[i] for i in indices[0]]
+def build_prompt(user_input, matched_paragraphs):
+    normalized_question = replace_synonyms(user_input)  # 정규화된 질문
+    combined_context = "\n".join([p.get("content", "") for p in matched_paragraphs])
+    policy_text = """
+[정책 및 지침 예시]
+- 다른 대학교 언급 금지
+- 위치 정보 정확히 사용할 것
+  * 천안캠퍼스: 충청남도 천안시 서북구 천안대로 1223-24(부대동 275
+  * 예산캠퍼스: 충청남도 예산군 예산읍 대학로 54(대회리1)
+  * 본교(공주캠퍼스): 충청남도 공주시 공주대학로 56(신관동 182)
+- 도서관 운영시간은 24시간이 아니야
+"""
 
-'''def build_prompt(user_input, matched_paragraphs):
-    combined_context = "\n".join([p["content"] for p in matched_paragraphs])
-    return f"""당신은 공주대학교에 관한 질문에만 답변하는 전문 AI입니다.
-
-- 절대로 다른 대학교(예: 국민대학교, 서울대 등)를 언급하거나 생성하지 마세요.  
-- 공주대학교는 캠퍼스별로 위치가 분리되어 있으므로, 실제 행정구역을 정확하게 사용하세요.  
-- 특히 \"공주시 천안동\", \"공주광역시 천안동\" 같은 잘못된 지명은 사용하지 마세요.  
-- 천안캠퍼스는 충청남도 천안시, 예산캠퍼스는 충청남도 예산군, 본교는 충청남도 공주시에 위치합니다.
-
-[질문]
-{user_input}
+    prompt = f"""당신은 공주대학교에 관한 질문에만 답변하는 전문 AI입니다.
 
 [관련 문단]
 {combined_context}
 
+{policy_text}
+
+[질문]
+{normalized_question} 
+
 [답변]
 """
-'''
-
-def build_prompt(user_input, matched_paragraphs):
-    combined_context = "\n".join([p["content"] for p in matched_paragraphs])
-
-    policy_text = """
-    [답변 작성 시 반드시 지켜야 할 규칙]
-
-    1) 모든 학과 위치 정보는 아래와 같습니다.
-       - 천안캠퍼스: 충청남도 천안시  
-       - 예산캠퍼스: 충청남도 예산군  
-       - 본교(공주캠퍼스): 충청남도 공주시  
-
-       예시: “소프트웨어학과는 천안캠퍼스(충청남도 천안시)에 있습니다.” 라고 답변하세요.
-
-    2) 절대로 잘못된 지명(예: “공주시 천안동”, “공주광역시 천안동”)을 언급하지 마세요.
-       - 천안캠퍼스는 반드시 “충청남도 천안시”로만 표기합니다.
-
-    3) 절대로 다른 대학교(예: 국민대학교, 서울대 등)를 언급하거나 생성하지 않습니다.
-       - 질문이 다른 대학교 관련이어도 “죄송합니다. 이 챗봇은 공주대학교 정보만 답변합니다.” 식으로 응답하세요.
-    """
-
-    prompt = f"""당신은 공주대학교에 관한 질문에만 답변하는 전문 AI입니다.
-
-    [관련 문단]
-    {combined_context}
-
-    {policy_text}
-
-    [질문]
-    {user_input}
-
-    [답변]
-    """
-
     return prompt
 
-def save_log(user_input, answer, log_dir="logs"):
-    os.makedirs(log_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join(log_dir, f"log_{timestamp}.txt")
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(f"[질문]\n{user_input}\n\n[답변]\n{answer}")
+
+okt = Okt()
+
+'''
+def extract_keywords(text, top_n=30):
+    """
+    명사 기반 키워드 추출
+    """
+    words = okt.nouns(text)
+    freq_dist = FreqDist(words)
+    return [word for word, freq in freq_dist.most_common(top_n)]
+'''
+
+
+def extract_keywords(text, top_n=30):
+
+    text = replace_synonyms(text)
+    """
+    형태소 분석 결과에서 명사(Noun)와 숫자(Number)만 추출한 뒤,
+    길이 2 이상인 단어를 대상으로 빈도 순으로 상위 top_n개를 반환합니다.
+    """
+    # 1) 형태소 분석 → (단어, 품사) 튜플 목록 얻기
+    pos_pairs = okt.pos(text, norm=True, stem=True)
+
+    # 2) 명사(Noun) 또는 숫자(Number)만 필터링, 길이 >= 2
+    cands = []
+    for word, tag in pos_pairs:
+        if tag in ("Noun", "Number") and len(word) >= 2:
+            cands.append(word)
+
+    # 3) 빈도 분석
+    freq_dist = FreqDist(cands)
+
+    # 4) 가장 빈도가 높은 top_n개 단어 리스트로 반환
+    return [word for word, _ in freq_dist.most_common(top_n)]
+
+
+def save_log(
+    user_input,
+    matched_paragraphs,
+    answer,
+    tokenizer,
+    model,
+    client_ip,
+    log_dir=None,
+):
+    """
+    RAG 과정과 일반 대화를 통합하여 로그를 기록하는 함수입니다.
+    """
+    try:
+        # 로그 디렉토리를 chat_utils.py와 같은 위치의 logs 폴더로 설정
+        current_file_dir = os.path.dirname(__file__)
+        log_dir = os.path.join(current_file_dir, "logs")
+        
+        # 로그 디렉토리 생성
+        os.makedirs(log_dir, exist_ok=True)
+        print(f"[LOG] 로그 디렉토리 생성/확인: {log_dir}")
+        
+        date_str = datetime.now().strftime("%Y%m%d")
+        filename = os.path.join(log_dir, f"chat_log_{date_str}.txt")
+        print(f"[LOG] 로그 파일 경로: {filename}")
+
+        normalized_input = replace_synonyms(user_input)
+
+
+        # 타임스탬프 생성
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 질문 키워드 추출
+        keywords = extract_keywords(user_input)
+
+        # 질문 임베딩 생성
+        query_embedding = embed_texts([user_input], tokenizer, model)[0].reshape(1, -1)
+
+        # 로그 항목 구성
+        log_entry = f"[시간] {timestamp}\n"
+        log_entry += f"[클라이언트 IP] {client_ip}\n"
+        log_entry += f"[질문] {user_input}\n"
+        log_entry += f"[키워드] {', '.join(keywords)}\n\n"
+
+        # 검색된 문단 및 유사도 계산
+        log_entry += "[검색된 문단]\n"
+        for i, para in enumerate(matched_paragraphs):
+            para_text = para.get("content", "")
+            para_category = para.get("category", "")
+            # 문단 임베딩 생성
+            para_embedding = embed_texts([para_text], tokenizer, model)[0].reshape(1, -1)
+            # 코사인 유사도 계산
+            dot_product = np.dot(query_embedding, para_embedding.T)
+            norm_query = np.linalg.norm(query_embedding)
+            norm_para = np.linalg.norm(para_embedding)
+            similarity = (
+                dot_product / (norm_query * norm_para) if norm_query * norm_para != 0 else 0
+            )
+            log_entry += (
+                f"문단 {i+1} (유사도: {similarity[0][0]:.3f}, "
+                f"카테고리: {para_category}):\n{para_text}\n\n"
+            )
+
+        # 답변 기록
+        log_entry += f"[답변]\n{answer}\n"
+        log_entry += "-" * 80 + "\n\n\n"
+
+        # 파일에 append 모드로 작성
+        with open(filename, "a", encoding="utf-8") as f:
+            f.write(log_entry)
+        
+        print(f"[LOG] 로그 저장 완료: {filename}")
+        
+        # 파일이 실제로 생성되었는지 확인
+        if os.path.exists(filename):
+            file_size = os.path.getsize(filename)
+            print(f"[LOG] 파일 크기: {file_size} bytes")
+        else:
+            print(f"[ERROR] 로그 파일이 생성되지 않음: {filename}")
+        
+    except Exception as e:
+        print(f"[ERROR] 로그 저장 실패: {e}")
+        import traceback
+        traceback.print_exc()

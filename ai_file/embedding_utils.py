@@ -24,4 +24,3 @@ def embed_texts(texts, tokenizer, model, batch_size=32):
         embeddings = model_output.last_hidden_state.mean(dim=1)  # 평균 풀링
         all_embeddings.append(embeddings)
     return torch.cat(all_embeddings, dim=0).cpu().numpy()
-
