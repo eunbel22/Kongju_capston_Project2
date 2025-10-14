@@ -1,5 +1,0 @@
-[질문]
-캠퍼스 위치가 어디야?
-
-[답변]
-[❌ LLM 요청 실패: Extra data: line 1 column 5 (char 4)]
