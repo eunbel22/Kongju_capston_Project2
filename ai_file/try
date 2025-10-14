@@ -1,0 +1,24 @@
+# 가상환경 생성
+python -m venv venv
+
+서버 실행 명령어
+# 가상환경 활성화
+venv\Scripts\activate
+
+cd ai_file
+
+uvicorn ai_server:app --host 127.0.0.1 --port 8000 --reload
+
+
+chat 실행 예시
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "캠퍼스가 몇 개야?"
+    }
+  ]
+}
+
+# venv 비활성화
+deactivate
