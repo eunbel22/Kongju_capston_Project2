@@ -11,7 +11,7 @@
 구분	기술 구성
 베이스 LLM	Qwen 2.5 시리즈 (3B / 7B Instruct)
 RAG 구성요소	ChromaDB, ko-sroberta-multitask (임베딩)
-비속어 필터	Kanana Safeguard
+비속어 필터	Kanana Safeguard 8B(4bit)
 서버 프레임워크	FastAPI, Uvicorn, Python 3.10+
 데이터베이스	SQLite (대화 로그) + ChromaDB (벡터 검색)
 프론트엔드	React + Axios (모바일 반응형 웹)
