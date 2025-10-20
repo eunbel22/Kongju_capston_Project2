@@ -6,6 +6,8 @@ from embedding_utils import embed_texts
 from nltk import FreqDist
 from konlpy.tag import Okt
 import json
+import re
+import torch
 
 # 동의어 사전 로드
 SYNONYMS = {
@@ -75,6 +77,77 @@ def is_small_talk(user_input: str) -> str | None:
         return SMALL_TALK_RESPONSES[candidates[0]]
 
     return None
+
+
+# === 기존 JSON 비속어 체크 ===
+PROFANITY_PATH = os.path.join(os.path.dirname(__file__), "profanity.json")
+try:
+    with open(PROFANITY_PATH, "r", encoding="utf-8") as f:
+        PROFANITY_LIST = json.load(f).get("bad_words", [])
+except Exception:
+    PROFANITY_LIST = []
+
+def contains_profanity(text: str) -> bool:
+    """JSON 리스트 기반 비속어 체크 (기존 방식)"""
+    t = text.lower()
+    for bad in PROFANITY_LIST:
+        if re.search(rf"\b{re.escape(bad)}\b", t):
+            return True
+    return False
+
+
+# === 🆕 AI 모델 기반 비속어 체크 ===
+def check_profanity_ai(user_input: str, model, tokenizer) -> bool:
+    """
+    AI 모델로 유해 콘텐츠 체크
+    
+    Returns:
+        True: UNSAFE (비속어/유해 콘텐츠 감지됨)
+        False: SAFE
+    """
+    if model is None or tokenizer is None:
+        # 모델이 없으면 JSON 방식으로 폴백
+        return contains_profanity(user_input)
+    
+    try:
+        messages = [{"role": "user", "content": user_input}]
+        
+        input_ids = tokenizer.apply_chat_template(
+            messages, 
+            tokenize=True, 
+            return_tensors="pt"
+        ).to(model.device)
+        
+        attention_mask = (input_ids != tokenizer.pad_token_id).long()
+        
+        with torch.no_grad():
+            output_ids = model.generate(
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=1,
+                pad_token_id=tokenizer.eos_token_id
+            )
+        
+        gen_idx = input_ids.shape[-1]
+        result_token = tokenizer.decode(
+            output_ids[0][gen_idx], 
+            skip_special_tokens=True
+        )
+        
+        # <UNSAFE-S1> ~ <UNSAFE-S7> 중 하나라도 있으면 True
+        is_unsafe = "UNSAFE" in result_token
+        
+        # 로깅 (선택사항)
+        if is_unsafe:
+            print(f"🚫 유해 콘텐츠 감지: {result_token} - \"{user_input[:50]}...\"")
+        
+        return is_unsafe
+        
+    except Exception as e:
+        print(f"❌ AI Safeguard 오류: {e}")
+        # 오류 시 JSON 방식으로 폴백
+        return contains_profanity(user_input)
+
 
 def build_prompt(user_input, matched_paragraphs):
     normalized_question = replace_synonyms(user_input)

@@ -7,13 +7,18 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import List
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
 
 from chat_utils import (
     is_small_talk,
     is_casual_or_emotional, 
     build_prompt,
     save_log,
-    extract_keywords
+    extract_keywords,
+    check_profanity_ai, 
+    contains_profanity,
 )
 from embedding_utils import load_embed_model, embed_texts
 from llm_utils import generate_answer_qwen, load_llm  # ← 수정: generate_answer_qwen 추가
@@ -25,7 +30,11 @@ from config import (
     INDEX_PATH,
     PROFANITY_PATH,
     CRAWL_BASE_URL,
-    ENVIRONMENT
+    ENVIRONMENT,
+    USE_AI_SAFEGUARD,        
+    SAFEGUARD_MODEL_NAME,    
+    SAFEGUARD_DEVICE,        
+    IS_SERVER,
 )
 
 app = FastAPI(title="공주대학교 AI 서버", version="1.0.0", debug=True)
@@ -61,20 +70,44 @@ HELP_RESPONSE = (
     "※ 공주대학교와 관계없는 질문은 정확히 답변하기 어려워요.\n"
 )
 
-# ── 비속어 목록 로드 ───────────────────────────────────────────────────────────
-try:
-    with open(PROFANITY_PATH, "r", encoding="utf-8") as f:
-        PROFANITY_LIST = json.load(f).get("bad_words", [])
-except Exception:
-    PROFANITY_LIST = []
 
+# === AI Safeguard 모델 로드 비속어 처리===
+safeguard_model = None
+safeguard_tokenizer = None
 
-def contains_profanity(text: str) -> bool:
-    t = text.lower()
-    for bad in PROFANITY_LIST:
-        if re.search(rf"\b{re.escape(bad)}\b", t):
-            return True
-    return False
+if USE_AI_SAFEGUARD:
+    print("\n" + "=" * 60)
+    print("🛡️  AI Safeguard 모델 로딩 중...")
+    print("=" * 60)
+    
+    try:
+        # 4-bit 양자화 설정
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16 if SAFEGUARD_DEVICE == "auto" else torch.float32
+        )
+        
+        safeguard_model = AutoModelForCausalLM.from_pretrained(
+            SAFEGUARD_MODEL_NAME,
+            quantization_config=quantization_config,
+            device_map=SAFEGUARD_DEVICE,
+            low_cpu_mem_usage=True
+        ).eval()
+        
+        safeguard_tokenizer = AutoTokenizer.from_pretrained(SAFEGUARD_MODEL_NAME)
+        
+        print(f"✅ AI Safeguard 로드 완료! (Device: {SAFEGUARD_DEVICE})")
+        
+    except Exception as e:
+        print(f"❌ AI Safeguard 로드 실패: {e}")
+        print("⚠️  JSON 비속어 리스트로 대체합니다.")
+        USE_AI_SAFEGUARD = False
+    
+    print("=" * 60 + "\n")
+else:
+    print("\n💡 JSON 비속어 리스트 모드로 실행 중...\n")
 
 
 # ── RAG 준비 ──────────────────────────────────────────────────────────────────
@@ -130,9 +163,20 @@ async def chat(request: Request, body: ChatRequest):
         raise HTTPException(400, "No user message provided")
 
     # 2) 비속어 감지
-    if contains_profanity(user_message):
+    if USE_AI_SAFEGUARD:
+        # AI 모델로 체크
+        is_unsafe = check_profanity_ai(
+            user_message, 
+            safeguard_model, 
+            safeguard_tokenizer
+        )
+    else:
+        # JSON 리스트로 체크 (기존 방식)
+        is_unsafe = contains_profanity(user_message)
+    
+    if is_unsafe:
         return {"response": CANNED_RESPONSE}
-
+    
     # 3) 도움말 요청 처리
     if user_message.strip() in ("도와줘", "도움말"):
         return {"response": HELP_RESPONSE}
