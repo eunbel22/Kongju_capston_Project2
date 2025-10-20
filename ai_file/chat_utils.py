@@ -22,8 +22,6 @@ def replace_synonyms(text):
                 text = text.replace(syn, key)
     return text
 
-
-
 # 프로젝트 구조에 따라 경로 조정
 SMALL_TALK_PATH = os.path.join(os.path.dirname(__file__), "small_talk.json")
 
@@ -35,14 +33,37 @@ except Exception as e:
     print(f"[chat_utils] small_talk.json 로드 실패: {e}")
     SMALL_TALK_RESPONSES = {}
 
+# ========== 새로 추가: 일상/감정 대화 감지 ========== 
+def is_casual_or_emotional(text: str) -> bool:
+    """
+    일반 대화나 감정 표현인지 판단
+    LLM으로 처리할 수 있는 일상적 질문들
+    """
+    casual_keywords = [
+        # 감정 표현
+        "배고", "배불", "먹고싶", "맛있",
+        "심심", "재미", "지루",
+        "힘들", "피곤", "지쳤", "우울", "슬프", "외로",
+        "행복", "좋아", "기쁘", "신나",
+        
+        # 일반 질문
+        "뭐하", "어떻게", "어디", "왜",
+        "추천", "해줘", "알려줘",
+        
+        # 학교 관련이지만 너무 일반적
+        "수업", "공부", "시험", "과제",
+        "대회", "동아리", "행사", "축제"
+    ]
+    
+    text_lower = text.lower().strip()
+    return any(kw in text_lower for kw in casual_keywords)
+
 def is_small_talk(user_input: str) -> str | None:
     """
-    1) 가장 먼저 키워드(키)에 substring 매칭을 시도합니다.
-    2) 없으면 difflib.get_close_matches로 유사한 키를 찾아봅니다.
-    3) 유사도가 cutoff 이상인 경우 해당 응답을 반환.
+    1) 기존 키워드 매칭 (핵심 패턴)
+    2) 유사도 매칭
     """
     text = replace_synonyms(user_input.strip())
-
 
     # 1) 부분 매칭
     for key, resp in SMALL_TALK_RESPONSES.items():
@@ -50,7 +71,6 @@ def is_small_talk(user_input: str) -> str | None:
             return resp
 
     # 2) 유사도 매칭
-    #    keys 목록 중에서 가장 비슷한 키 하나 찾기
     candidates = difflib.get_close_matches(text, SMALL_TALK_RESPONSES.keys(),
                                            n=1, cutoff=0.6)
     if candidates:
@@ -130,7 +150,7 @@ def check_profanity_ai(user_input: str, model, tokenizer) -> bool:
 
 
 def build_prompt(user_input, matched_paragraphs):
-    normalized_question = replace_synonyms(user_input)  # 정규화된 질문
+    normalized_question = replace_synonyms(user_input)
     combined_context = "\n".join([p.get("content", "") for p in matched_paragraphs])
     policy_text = """
 [정책 및 지침 예시]
@@ -159,37 +179,20 @@ def build_prompt(user_input, matched_paragraphs):
 
 okt = Okt()
 
-'''
 def extract_keywords(text, top_n=30):
-    """
-    명사 기반 키워드 추출
-    """
-    words = okt.nouns(text)
-    freq_dist = FreqDist(words)
-    return [word for word, freq in freq_dist.most_common(top_n)]
-'''
-
-
-def extract_keywords(text, top_n=30):
-
     text = replace_synonyms(text)
     """
     형태소 분석 결과에서 명사(Noun)와 숫자(Number)만 추출한 뒤,
     길이 2 이상인 단어를 대상으로 빈도 순으로 상위 top_n개를 반환합니다.
     """
-    # 1) 형태소 분석 → (단어, 품사) 튜플 목록 얻기
     pos_pairs = okt.pos(text, norm=True, stem=True)
 
-    # 2) 명사(Noun) 또는 숫자(Number)만 필터링, 길이 >= 2
     cands = []
     for word, tag in pos_pairs:
         if tag in ("Noun", "Number") and len(word) >= 2:
             cands.append(word)
 
-    # 3) 빈도 분석
     freq_dist = FreqDist(cands)
-
-    # 4) 가장 빈도가 높은 top_n개 단어 리스트로 반환
     return [word for word, _ in freq_dist.most_common(top_n)]
 
 
@@ -206,11 +209,9 @@ def save_log(
     RAG 과정과 일반 대화를 통합하여 로그를 기록하는 함수입니다.
     """
     try:
-        # 로그 디렉토리를 chat_utils.py와 같은 위치의 logs 폴더로 설정
         current_file_dir = os.path.dirname(__file__)
         log_dir = os.path.join(current_file_dir, "logs")
         
-        # 로그 디렉토리 생성
         os.makedirs(log_dir, exist_ok=True)
         print(f"[LOG] 로그 디렉토리 생성/확인: {log_dir}")
         
@@ -220,30 +221,20 @@ def save_log(
 
         normalized_input = replace_synonyms(user_input)
 
-
-        # 타임스탬프 생성
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # 질문 키워드 추출
         keywords = extract_keywords(user_input)
-
-        # 질문 임베딩 생성
         query_embedding = embed_texts([user_input], tokenizer, model)[0].reshape(1, -1)
 
-        # 로그 항목 구성
         log_entry = f"[시간] {timestamp}\n"
         log_entry += f"[클라이언트 IP] {client_ip}\n"
         log_entry += f"[질문] {user_input}\n"
         log_entry += f"[키워드] {', '.join(keywords)}\n\n"
 
-        # 검색된 문단 및 유사도 계산
         log_entry += "[검색된 문단]\n"
         for i, para in enumerate(matched_paragraphs):
             para_text = para.get("content", "")
             para_category = para.get("category", "")
-            # 문단 임베딩 생성
             para_embedding = embed_texts([para_text], tokenizer, model)[0].reshape(1, -1)
-            # 코사인 유사도 계산
             dot_product = np.dot(query_embedding, para_embedding.T)
             norm_query = np.linalg.norm(query_embedding)
             norm_para = np.linalg.norm(para_embedding)
@@ -255,17 +246,14 @@ def save_log(
                 f"카테고리: {para_category}):\n{para_text}\n\n"
             )
 
-        # 답변 기록
         log_entry += f"[답변]\n{answer}\n"
         log_entry += "-" * 80 + "\n\n\n"
 
-        # 파일에 append 모드로 작성
         with open(filename, "a", encoding="utf-8") as f:
             f.write(log_entry)
         
         print(f"[LOG] 로그 저장 완료: {filename}")
         
-        # 파일이 실제로 생성되었는지 확인
         if os.path.exists(filename):
             file_size = os.path.getsize(filename)
             print(f"[LOG] 파일 크기: {file_size} bytes")

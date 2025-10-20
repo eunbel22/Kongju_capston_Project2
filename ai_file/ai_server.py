@@ -13,6 +13,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from chat_utils import (
     is_small_talk,
+    is_casual_or_emotional, 
     build_prompt,
     save_log,
     extract_keywords,
@@ -346,27 +347,57 @@ async def chat(request: Request, body: ChatRequest):
         sims.append(sim)
     max_sim = max(sims) if sims else 0.0
 
-    # 9) 매칭 실패 혹은 유사도 낮음 → 고정 응답
-    if not matched or max_sim < 0.45:
-        return {"response": CANNED_RESPONSE}
+    # 9) RAG 성공: 공주대 정보 제공
+    if matched and max_sim >= 0.45:
+        prompt = build_prompt(user_message, matched)
+        answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
 
-    # 10) 프롬프트 작성 → LLM 호출
-    prompt = build_prompt(user_message, matched)
-    # ← 수정: llm_tokenizer, llm_model 전달
-    answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
+        client_ip = get_client_ip(request)
+        save_log(
+            user_input=user_message,
+            matched_paragraphs=matched,
+            answer=answer,
+            tokenizer=tokenizer,
+            model=model,
+            client_ip=client_ip
+        )
+        return {"response": answer}
 
-    # 11) 클라이언트 IP 추출
-    client_ip = get_client_ip(request)
+    # ========== 🆕 10) 하이브리드: 일상 대화 LLM 처리 ==========
+    if is_casual_or_emotional(user_message):
+        casual_prompt = f"""당신은 공주대학교 정보 챗봇 포티입니다.
 
-    # 12) 로그 기록
-    save_log(
-        user_input=user_message,
-        matched_paragraphs=matched,
-        answer=answer,
-        tokenizer=tokenizer,
-        model=model,
-        client_ip=client_ip
-    )
+사용자가 공주대와 직접 관련 없는 일상적 이야기를 했습니다.
+하지만 친절하게 공감하고, 자연스럽게 공주대 관련 정보로 연결하세요.
 
-    # 13) 최종 응답
-    return {"response": answer}
+[사용자 입력]
+{user_message}
+
+[응답 지침]
+1. 사용자 감정/상황에 공감 표현
+2. 공주대 관련 서비스나 정보로 자연스럽게 유도
+3. 구체적인 질문 유도
+
+[응답 예시]
+- "배고파" → "배고프시군요! 🍚 공주대 식당 메뉴 확인해보실래요? '천안캠퍼스 오늘 식단'처럼 물어보세요!"
+- "힘들어" → "힘드시군요 😔 학교 생활이 버거울 땐 학생상담센터(☎ 041-850-8197)를 이용해보세요!"
+- "심심해" → "그럴 땐 동아리 활동이 어때요? 관심 분야를 말씀해주시면 추천해드릴게요!"
+- "뭐하면 좋을까" → "공주대에는 다양한 활동이 있어요! 동아리, 학술대회, 행사 등 어떤 게 궁금하신가요?"
+
+[답변]
+"""
+        answer = generate_answer_qwen(casual_prompt, llm_tokenizer, llm_model)
+        
+        client_ip = get_client_ip(request)
+        save_log(
+            user_input=user_message,
+            matched_paragraphs=[],  # RAG 미사용
+            answer=answer,
+            tokenizer=tokenizer,
+            model=model,
+            client_ip=client_ip
+        )
+        return {"response": answer}
+
+    # 11) 완전히 무관한 질문
+    return {"response": CANNED_RESPONSE}
