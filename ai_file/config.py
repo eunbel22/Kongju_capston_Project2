@@ -72,17 +72,17 @@ print("=" * 60 + "\n")
 MODEL_CONFIG = {
     'local': {
         'model_name': 'Qwen/Qwen2.5-3B-Instruct',
-        'max_new_tokens': 128,
-        'temperature': 0.7,
+        'max_new_tokens': 256,
+        'temperature': 0.8,
         'top_p': 0.9,
         'repetition_penalty': 1.1,
     },
     'server': {
-        'model_name': 'Qwen/Qwen2.5-7B-Instruct',
+        'model_name': 'upstage/SOLAR-10.7B-Instruct-v1.0',
         'max_new_tokens': 2048,
-        'temperature': 0.7,
+        'temperature': 0.8,  #숫자up 더 창의적
         'top_p': 0.9,
-        'repetition_penalty': 1.1,
+        'repetition_penalty': 1.1, #숫자up 반복 방지
     }
 }
 
