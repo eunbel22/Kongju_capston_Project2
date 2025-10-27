@@ -73,7 +73,8 @@ def generate_answer_qwen(prompt, tokenizer, model):
                 do_sample=True,
                 pad_token_id=tokenizer.eos_token_id,
                 eos_token_id=tokenizer.eos_token_id,
-                repetition_penalty=repetition_penalty
+                repetition_penalty=repetition_penalty,
+                early_stopping=True  # 🆕 추가: 답변 완료 시 즉시 중단
             )
         
         # 입력 부분 제거하고 답변만 디코딩

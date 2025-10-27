@@ -363,35 +363,224 @@ async def chat(request: Request, body: ChatRequest):
         )
         return {"response": answer}
 
-    # ========== 🆕 10) 하이브리드: 일상 대화 LLM 처리 ==========
+    # 9) RAG 성공: 공주대 정보 제공
+    if matched and max_sim >= 0.45:
+        prompt = build_prompt(user_message, matched)
+        answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
+
+        client_ip = get_client_ip(request)
+        save_log(
+            user_input=user_message,
+            matched_paragraphs=matched,
+            answer=answer,
+            tokenizer=tokenizer,
+            model=model,
+            client_ip=client_ip
+        )
+        return {"response": answer}
+
+    # ========== 10) 하이브리드: 일상 대화 LLM 처리 ==========
     if is_casual_or_emotional(user_message):
-        casual_prompt = f"""당신은 공주대학교 정보 챗봇 포티입니다.
-
-사용자가 공주대와 직접 관련 없는 일상적 이야기를 했습니다.
-하지만 친절하게 공감하고, 자연스럽게 공주대 관련 정보로 연결하세요.
-
-[사용자 입력]
-{user_message}
-
-[응답 지침]
-1. 사용자 감정/상황에 공감 표현
-2. 공주대 관련 서비스나 정보로 자연스럽게 유도
-3. 구체적인 질문 유도
-
-[응답 예시]
-- "배고파" → "배고프시군요! 🍚 공주대 식당 메뉴 확인해보실래요? '천안캠퍼스 오늘 식단'처럼 물어보세요!"
-- "힘들어" → "힘드시군요 😔 학교 생활이 버거울 땐 학생상담센터(☎ 041-850-8197)를 이용해보세요!"
-- "심심해" → "그럴 땐 동아리 활동이 어때요? 관심 분야를 말씀해주시면 추천해드릴게요!"
-- "뭐하면 좋을까" → "공주대에는 다양한 활동이 있어요! 동아리, 학술대회, 행사 등 어떤 게 궁금하신가요?"
-
-[답변]
-"""
-        answer = generate_answer_qwen(casual_prompt, llm_tokenizer, llm_model)
+        
+        # 환경별 프롬프트 선택
+        if ENVIRONMENT == 'server':
+            # SOLAR 전용 프롬프트 (서버)
+            messages = [
+                {
+                    "role": "system", 
+                    "content": "당신은 공주대 학생 친구 포티입니다. 반말로 1-2문장만 짧게 답변하세요."
+                },
+                {
+                    "role": "user", 
+                    "content": user_message
+                }
+            ]
+            
+            prompt = llm_tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+            
+            inputs = llm_tokenizer(prompt, return_tensors="pt").to(llm_model.device)
+            
+            with torch.no_grad():
+                outputs = llm_model.generate(
+                    **inputs,
+                    max_new_tokens=80,
+                    temperature=0.6,
+                    top_p=0.9,
+                    do_sample=True,
+                    pad_token_id=llm_tokenizer.eos_token_id,
+                    eos_token_id=llm_tokenizer.eos_token_id,
+                    repetition_penalty=1.2,
+                    early_stopping=True
+                )
+            
+            answer = llm_tokenizer.decode(
+                outputs[0][inputs['input_ids'].shape[1]:],
+                skip_special_tokens=True
+            ).strip()
+        
+        else:
+            # Qwen 전용: 패턴 매칭 (로컬)
+            import random
+            
+            casual_responses = {
+                # 배고픔 관련
+                "배고": [
+                    "배고프구나! 궁금한 캠퍼스 식당 말해봐. 식단 알려줄게!",
+                    "학식 시간이네! '천안캠퍼스 식단' 이런 식으로 물어봐.",
+                    "오늘 뭐 먹을지 고민돼? 캠퍼스 식당 메뉴 확인해줄게!"
+                ],
+                "먹고싶": [
+                    "뭐 먹고 싶어? 학식 메뉴 알려줄까?",
+                    "입맛 당기는 거 있어? 식당 메뉴 찾아볼게!",
+                    "오늘 메뉴 궁금하면 말해봐!"
+                ],
+                "배불": [
+                    "든든하게 먹었구나! 좋아 😊",
+                    "배불러? 잘 먹었네!",
+                    "맛있게 먹었어? 다행이야!"
+                ],
+                
+                # 심심함 관련
+                "심심": [
+                    "심심하면 공주대 홈페이지 들어가봐! 행사 정보 있을 거야.",
+                    "동아리 활동 어때? 재밌는 거 많아!",
+                    "공주대 공지사항 확인해봐. 대회나 행사 있을지도!",
+                    "학교 축제나 이벤트 찾아보는 건 어때?"
+                ],
+                "지루": [
+                    "지루해? 새로운 활동 시작해볼까?",
+                    "동아리 하나 들어가보는 건 어때?",
+                    "공주대 행사 찾아봐! 재밌는 것 있을걸?"
+                ],
+                "재미": [
+                    "재밌는 거 찾아? 공주대 행사 확인해봐!",
+                    "학교 동아리나 대회 어때?",
+                    "공지사항에 이벤트 정보 있을 거야!"
+                ],
+                
+                # 힘듦/피곤 관련
+                "힘들": [
+                    "많이 힘들어? 학생상담센터(041-850-8197) 이용해봐.",
+                    "힘들 땐 혼자 고민하지 말고 상담센터에 연락해봐.",
+                    "학교 생활 버거워? 학생상담센터가 도와줄 거야."
+                ],
+                "피곤": [
+                    "많이 피곤해? 푹 쉬어!",
+                    "무리하지 말고 좀 쉬어.",
+                    "피곤하면 휴식이 최고야. 잘 쉬어!"
+                ],
+                "우울": [
+                    "우울할 땐 전문가와 얘기하는 게 좋아. 학생상담센터(041-850-8197) 전화해봐.",
+                    "혼자 고민하지 마. 상담센터에서 도움받을 수 있어.",
+                    "힘들면 언제든 학생상담센터 찾아가. 도움 받을 수 있어."
+                ],
+                "슬프": [
+                    "슬퍼? 괜찮아질 거야. 도움 필요하면 말해.",
+                    "힘든 일 있어? 학생상담센터가 도와줄 수 있어.",
+                    "슬플 땐 누군가와 얘기하는 게 좋아. 상담센터 이용해봐."
+                ],
+                
+                # 할 일 찾기
+                "뭐하": [
+                    "뭐 하지? 공주대 행사 찾아보는 건 어때?",
+                    "보드게임이나 운동 해볼까?",
+                    "동아리 활동이나 대회 참가해보는 건 어때?",
+                    "공주대 홈페이지에서 재밌는 프로그램 찾아봐!"
+                ],
+                "할거": [
+                    "할 거 없어? 학교 행사 찾아봐!",
+                    "공주대 공지 확인해. 뭔가 있을 거야!",
+                    "동아리 활동 추천해!"
+                ],
+                "추천": [
+                    "뭘 추천해줄까? 관심 분야 말해봐!",
+                    "동아리? 대회? 행사? 뭐가 궁금해?",
+                    "공주대엔 다양한 활동이 있어. 구체적으로 말해줘!"
+                ],
+                
+                # 학교 관련
+                "수업": [
+                    "수업 관련해서 뭐가 궁금해?",
+                    "수업 힘들어? 구체적으로 물어봐!",
+                    "수강신청? 시간표? 뭐가 궁금한 거야?"
+                ],
+                "과제": [
+                    "과제 많지? 힘들겠다. 화이팅!",
+                    "과제 기간이구나. 힘내!",
+                    "과제 힘들지? 조금만 더 힘내봐!"
+                ],
+                "시험": [
+                    "시험 기간이구나. 파이팅!",
+                    "시험 준비 힘들지? 화이팅!",
+                    "시험 잘 치러! 열심히 한 만큼 결과 나올 거야."
+                ],
+                "성적": [
+                    "성적 관련 궁금한 거 있어?",
+                    "성적 걱정돼? 구체적으로 물어봐!",
+                    "학점이나 성적 조회 관련해서 뭐가 궁금해?"
+                ],
+                
+                # 활동 관련
+                "대회": [
+                    "대회 나가보고 싶어? 공주대 홈페이지에서 정보 찾아봐!",
+                    "어떤 분야 대회 관심 있어? 말해봐!",
+                    "공주대 공지사항에 대회 정보 자주 올라와!"
+                ],
+                "동아리": [
+                    "동아리 관심 있어? 어떤 분야 좋아해?",
+                    "관심 분야 말해줘! 동아리 추천해줄게.",
+                    "공주대엔 동아리 많아. IT? 운동? 예술?"
+                ],
+                "행사": [
+                    "행사 찾아? 공주대 공지사항 확인해봐!",
+                    "학교 행사 궁금해? 홈페이지 들어가봐!",
+                    "축제나 이벤트 정보는 공지사항에 있어!"
+                ],
+                "축제": [
+                    "축제 기대돼? 공지 확인해봐!",
+                    "공주대 축제 정보는 홈페이지에서 확인!",
+                    "축제 시즌엔 행사 많아. 놓치지 마!"
+                ],
+                
+                # 기타
+                "공부": [
+                    "공부 힘들지? 뭐가 어려워?",
+                    "열심히 하는구나! 화이팅!",
+                    "도서관 운영시간 궁금해? 물어봐!"
+                ],
+                "친구": [
+                    "친구 만들고 싶어? 동아리 추천해!",
+                    "새로운 사람 만나려면 학교 활동 참여해봐!",
+                    "동아리나 스터디 그룹 어때?"
+                ],
+                "장학": [
+                    "장학금 관련 궁금한 거야? 학생지원팀에 문의해봐!",
+                    "장학금 정보는 학교 홈페이지 확인해!",
+                    "장학 관련 구체적으로 뭐가 궁금해?"
+                ],
+            }
+            
+            answer = None
+            for keyword, responses in casual_responses.items():
+                if keyword in user_message:
+                    answer = random.choice(responses)
+                    break
+            
+            if not answer:
+                answer = "공주대 관련해서 구체적으로 물어봐! 😊"
+        
+        # 안전장치
+        if not answer or len(answer) < 5:
+            answer = "공주대 얘기면 뭐든 물어봐! 😊"
         
         client_ip = get_client_ip(request)
         save_log(
             user_input=user_message,
-            matched_paragraphs=[],  # RAG 미사용
+            matched_paragraphs=[],
             answer=answer,
             tokenizer=tokenizer,
             model=model,
