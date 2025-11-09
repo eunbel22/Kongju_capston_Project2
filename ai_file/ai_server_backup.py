@@ -2,13 +2,11 @@ import os
 import json
 import re
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
-from typing import List, Optional
-from collections import defaultdict
-import torch
+from typing import List
 
 from chat_utils import (
     is_small_talk,
@@ -17,9 +15,8 @@ from chat_utils import (
     extract_keywords
 )
 from embedding_utils import load_embed_model, embed_texts
-from llm_utils import generate_answer_qwen, load_llm
+from llm_utils import generate_answer_qwen, load_llm  # ← 수정: generate_answer_qwen 추가
 from data_utils import load_paragraphs, prepare_faiss
-from profanity_filter import contains_profanity  # 🆕 새 비속어 필터
 from config import (
     DATA_PATH,
     SHUTTLE_PATH,
@@ -34,52 +31,6 @@ app = FastAPI(title="공주대학교 AI 서버", version="1.0.0", debug=True)
 
 print(f"[서버 모드] {ENVIRONMENT}")
 
-# ========== 🆕 대화 히스토리 저장소 ==========
-conversation_history = defaultdict(list)  # {session_id: [messages]}
-session_last_activity = {}  # {session_id: last_access_time}
-
-# 세션 타임아웃 (30분)
-SESSION_TIMEOUT = timedelta(minutes=30)
-
-def cleanup_old_sessions():
-    """30분 이상 비활성 세션 삭제"""
-    now = datetime.now()
-    expired = [
-        sid for sid, last_time in session_last_activity.items()
-        if now - last_time > SESSION_TIMEOUT
-    ]
-    for sid in expired:
-        del conversation_history[sid]
-        del session_last_activity[sid]
-    
-    if expired:
-        print(f"[세션 정리] {len(expired)}개 세션 삭제")
-
-def get_session_id(request: Request) -> str:
-    """클라이언트 IP 기반 세션 ID 생성"""
-    client_ip = get_client_ip(request)
-    return f"session_{client_ip}"
-
-def add_to_history(session_id: str, role: str, content: str):
-    """대화 히스토리에 추가 (최근 10턴만 유지)"""
-    conversation_history[session_id].append({
-        "role": role,
-        "content": content,
-        "timestamp": datetime.now()
-    })
-    
-    # 최근 20개만 유지 (user+assistant 쌍 10턴)
-    if len(conversation_history[session_id]) > 20:
-        conversation_history[session_id] = conversation_history[session_id][-20:]
-    
-    session_last_activity[session_id] = datetime.now()
-
-def get_history(session_id: str, max_turns: int = 3) -> List[dict]:
-    """최근 N턴의 대화 가져오기"""
-    history = conversation_history.get(session_id, [])
-    # 최근 max_turns*2 개 (user+assistant 쌍)
-    return history[-(max_turns * 2):]
-
 # shuttlebus.json 로드
 try:
     with open(SHUTTLE_PATH, "r", encoding="utf-8") as f:
@@ -87,7 +38,7 @@ try:
 except:
     shuttle_data = None
 
-# 고정 응답 상수
+# ── 고정 응답 상수 ─────────────────────────────────────────────────────────────
 CANNED_RESPONSE = (
     "포티는 공주대학교에 대한 정보만 알고 있어요💡 "
     "학교와 관련된 질문이라면 뭐든 도와드릴게요! "
@@ -109,29 +60,42 @@ HELP_RESPONSE = (
     "※ 공주대학교와 관계없는 질문은 정확히 답변하기 어려워요.\n"
 )
 
-# ❌ 비속어 관련 코드 제거 (profanity_filter.py로 이동)
+# ── 비속어 목록 로드 ───────────────────────────────────────────────────────────
+try:
+    with open(PROFANITY_PATH, "r", encoding="utf-8") as f:
+        PROFANITY_LIST = json.load(f).get("bad_words", [])
+except Exception:
+    PROFANITY_LIST = []
 
-# RAG 준비
+
+def contains_profanity(text: str) -> bool:
+    t = text.lower()
+    for bad in PROFANITY_LIST:
+        if re.search(rf"\b{re.escape(bad)}\b", t):
+            return True
+    return False
+
+
+# ── RAG 준비 ──────────────────────────────────────────────────────────────────
 print("[초기화] 데이터 로딩 중...")
 data = load_paragraphs(DATA_PATH)
 tokenizer, model = load_embed_model()
 index = prepare_faiss(data, DATA_PATH, EMBED_PATH, INDEX_PATH, tokenizer, model)
 print("[초기화] RAG 시스템 준비 완료!")
 
-# LLM 모델 로드
+# ── LLM 모델 로드 (새로 추가!) ────────────────────────────────────────────────
 print("[초기화] LLM 모델 로딩 중...")
-llm_tokenizer, llm_model = load_llm()
+llm_tokenizer, llm_model = load_llm()  # ← 추가: 서버 시작 시 LLM 사전 로드
 print("[초기화] LLM 모델 로드 완료!")
 
 
-# Request/Response 모델
+# ── Request/Response 모델 ───────────────────────────────────────────────────────
 class ChatMessage(BaseModel):
     role: str
     content: str
 
 
 class ChatRequest(BaseModel):
-    sessionId: Optional[str] = None
     messages: List[ChatMessage]
 
 
@@ -156,155 +120,28 @@ def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def is_casual_conversation(text: str) -> bool:
-    """일상 대화인지 판단 (간단한 패턴 매칭)"""
-    casual_patterns = [
-        "배고", "졸", "피곤", "심심", "지루", "재밌", "신나", "좋아", 
-        "사랑", "응", "그래", "알았어", "오케이", "ok", "ㅇㅋ"
-    ]
-    return any(p in text for p in casual_patterns)
-
-
-# API 엔드포인트
-@app.get("/api/ai/health")
-async def ai_health():
-    """AI 서버 헬스 체크"""
-    return {"status": "ok"}
-
-@app.post("/api/ai/query")
+# ── API 엔드포인트 ─────────────────────────────────────────────────────────────
+@app.post("/api/chat")
 async def chat(request: Request, body: ChatRequest):
-    # 세션 정리
-    cleanup_old_sessions()
-    
-    # 세션 ID 생성
-    session_id = get_session_id(request)
-    
     # 1) 마지막 사용자 메시지 추출
     user_message = next((m.content for m in reversed(body.messages) if m.role == "user"), None)
     if not user_message:
         raise HTTPException(400, "No user message provided")
 
-    # 🆕 사용자 메시지를 히스토리에 추가
-    add_to_history(session_id, "user", user_message)
-
     # 2) 비속어 감지
     if contains_profanity(user_message):
-        print(f"[비속어 차단] 세션: {session_id}, 입력: '{user_message}'")
-        answer = CANNED_RESPONSE
-        add_to_history(session_id, "assistant", answer)
-        return {"response": answer}
+        return {"response": CANNED_RESPONSE}
 
     # 3) 도움말 요청 처리
     if user_message.strip() in ("도와줘", "도움말"):
-        answer = HELP_RESPONSE
-        add_to_history(session_id, "assistant", answer)
-        return {"response": answer}
+        return {"response": HELP_RESPONSE}
 
     # 4) 간단 인삿말 처리
     small = is_small_talk(user_message)
     if small:
-        add_to_history(session_id, "assistant", small)
         return {"response": small}
 
-    # 🆕 5) 일상 대화 처리 (LLM + 히스토리)
-    if is_casual_conversation(user_message):
-        # 이전 대화 가져오기
-        history = get_history(session_id, max_turns=3)
-        
-        # 시스템 메시지
-        system_content = "당신은 공주대 학생들의 친구 포티입니다. 이전 대화를 기억하며 자연스럽게 대화하세요. 반말로 1-2문장만 짧게 답변하세요."
-        
-        messages = [
-            {"role": "system", "content": system_content}
-        ]
-        
-        # 이전 대화 추가 (현재 메시지 제외)
-        for msg in history[:-1]:
-            messages.append({
-                "role": msg["role"],
-                "content": msg["content"]
-            })
-        
-        # 현재 질문
-        messages.append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # 채팅 템플릿 적용
-        try:
-            prompt = llm_tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-        except Exception as e:
-            # 템플릿 미지원 시 간단한 프롬프트
-            prompt = f"{system_content}\n\n"
-            for msg in messages[1:]:
-                prompt += f"{msg['role']}: {msg['content']}\n"
-            prompt += "assistant: "
-        
-        # 🐛 디버깅: 프롬프트 출력
-        print(f"\n[DEBUG] 히스토리 개수: {len(history)}")
-        print(f"[DEBUG] 전달되는 메시지 개수: {len(messages)}")
-        print(f"[DEBUG] 프롬프트:\n{prompt}\n")
-        
-        inputs = llm_tokenizer(prompt, return_tensors="pt").to(llm_model.device)
-        
-        # 환경별 파라미터
-        if ENVIRONMENT == 'production':
-            max_tokens, temp = 80, 0.6
-        else:
-            max_tokens, temp = 50, 0.7
-        
-        with torch.no_grad():
-            outputs = llm_model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                temperature=temp,
-                top_p=0.9,
-                do_sample=True,
-                pad_token_id=llm_tokenizer.eos_token_id,
-                eos_token_id=llm_tokenizer.eos_token_id,
-                repetition_penalty=1.3,
-                early_stopping=True
-            )
-        
-        answer = llm_tokenizer.decode(
-            outputs[0][inputs['input_ids'].shape[1]:],
-            skip_special_tokens=True
-        ).strip()
-        
-        # Local에서는 강제로 짧게
-        if ENVIRONMENT != 'production':
-            # 첫 문장만
-            for sep in ['. ', '! ', '? ', '\n']:
-                if sep in answer:
-                    answer = answer.split(sep)[0] + sep.strip()
-                    break
-            # 50자 제한
-            if len(answer) > 50:
-                answer = answer[:47] + '...'
-        
-        if not answer or len(answer) < 3:
-            answer = "공주대 얘기면 뭐든 물어봐! 😊"
-        
-        # 히스토리에 추가
-        add_to_history(session_id, "assistant", answer)
-        
-        client_ip = get_client_ip(request)
-        save_log(
-            user_input=user_message,
-            matched_paragraphs=[],
-            answer=answer,
-            tokenizer=tokenizer,
-            model=model,
-            client_ip=client_ip
-        )
-        return {"response": answer}
-
-    # 셔틀/버스 질문 처리
+    # ── 셔틀/버스 질문 처리 ────────────────────────────────────────────────
     if any(kw in user_message for kw in ("셔틀", "버스")) and shuttle_data:
         locations = re.findall(r"[가-힣]+", user_message)
         
@@ -331,9 +168,8 @@ async def chat(request: Request, body: ChatRequest):
 
 [답변]
 """
+        # ← 수정: llm_tokenizer, llm_model 전달
         answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
-        
-        add_to_history(session_id, "assistant", answer)
         
         client_ip = request.client.host
         save_log(
@@ -359,7 +195,6 @@ async def chat(request: Request, body: ChatRequest):
             "  – 예산캠퍼스: 생명과학·산림자원 분야\n\n"
             "더 궁금하신 점이 있으면 언제든 질문해주세요!"
         )
-        add_to_history(session_id, "assistant", intro)
         return {"response": intro}
 
     # 메뉴/식단 질문 처리
@@ -391,9 +226,7 @@ async def chat(request: Request, body: ChatRequest):
                 resp.raise_for_status()
                 crawl_data = resp.json()
             except Exception as e:
-                answer = f"실시간 식단 정보 조회 중 오류 발생: {e}"
-                add_to_history(session_id, "assistant", answer)
-                return {"response": answer}
+                return {"response": f"실시간 식단 정보 조회 중 오류 발생: {e}"}
 
         today = datetime.now().strftime("%m월 %d일")
         today_meal = next(
@@ -403,9 +236,7 @@ async def chat(request: Request, body: ChatRequest):
         )
 
         if not today_meal:
-            answer = f"{campus.capitalize()} 캠퍼스 식단 정보가 준비되지 않았습니다."
-            add_to_history(session_id, "assistant", answer)
-            return {"response": answer}
+            return {"response": f"{campus.capitalize()} 캠퍼스 식단 정보가 준비되지 않았습니다."}
 
         def clean(item: str) -> str:
             if not item:
@@ -438,8 +269,6 @@ async def chat(request: Request, body: ChatRequest):
                 f"🌙 저녁: {dn or '정보 없음'}"
             )
 
-        add_to_history(session_id, "assistant", answer)
-        
         save_log(
             user_input=user_message,
             matched_paragraphs=[],
@@ -450,14 +279,14 @@ async def chat(request: Request, body: ChatRequest):
         )
         return {"response": answer}
 
-    # 6) RAG 처리 - 쿼리 임베딩 계산
+    # 5) 쿼리 임베딩 계산
     q_emb = embed_texts([user_message], tokenizer, model)[0]
 
-    # 7) FAISS 검색 (상위 3개)
+    # 6) FAISS 검색 (상위 3개)
     _, idxs = index.search(q_emb.reshape(1, -1), 3)
     matched = [data[i] for i in idxs[0] if i < len(data)]
 
-    # 8) 핵심 키워드 추출 및 문단 필터링
+    # 7) 핵심 키워드 추출 및 문단 필터링
     keywords = extract_keywords(user_message)
     if keywords:
         matched = [
@@ -465,7 +294,7 @@ async def chat(request: Request, body: ChatRequest):
             if any(kw in p.get("content", "") for kw in keywords)
         ]
 
-    # 9) 코사인 유사도 계산 및 임계값 검사
+    # 8) 코사인 유사도 계산 및 임계값 검사
     sims = []
     for p in matched:
         p_emb = embed_texts([p.get("content", "")], tokenizer, model)[0]
@@ -473,23 +302,19 @@ async def chat(request: Request, body: ChatRequest):
         sims.append(sim)
     max_sim = max(sims) if sims else 0.0
 
-    # 10) 매칭 실패 혹은 유사도 낮음 → 고정 응답
+    # 9) 매칭 실패 혹은 유사도 낮음 → 고정 응답
     if not matched or max_sim < 0.45:
-        answer = CANNED_RESPONSE
-        add_to_history(session_id, "assistant", answer)
-        return {"response": answer}
+        return {"response": CANNED_RESPONSE}
 
-    # 11) 프롬프트 작성 → LLM 호출
+    # 10) 프롬프트 작성 → LLM 호출
     prompt = build_prompt(user_message, matched)
+    # ← 수정: llm_tokenizer, llm_model 전달
     answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
 
-    # 12) 히스토리에 추가
-    add_to_history(session_id, "assistant", answer)
-
-    # 13) 클라이언트 IP 추출
+    # 11) 클라이언트 IP 추출
     client_ip = get_client_ip(request)
 
-    # 14) 로그 기록
+    # 12) 로그 기록
     save_log(
         user_input=user_message,
         matched_paragraphs=matched,
@@ -499,38 +324,5 @@ async def chat(request: Request, body: ChatRequest):
         client_ip=client_ip
     )
 
-    # 15) 최종 응답
+    # 13) 최종 응답
     return {"response": answer}
-
-
-# 🆕 히스토리 관리 API
-@app.post("/api/chat/reset")
-async def reset_conversation(request: Request):
-    """대화 히스토리 초기화"""
-    session_id = get_session_id(request)
-    
-    if session_id in conversation_history:
-        del conversation_history[session_id]
-        del session_last_activity[session_id]
-    
-    return {"message": "대화 기록이 초기화되었습니다."}
-
-
-@app.get("/api/chat/history")
-async def get_conversation_history(request: Request):
-    """현재 세션의 대화 히스토리 조회"""
-    session_id = get_session_id(request)
-    history = conversation_history.get(session_id, [])
-    
-    return {
-        "session_id": session_id,
-        "message_count": len(history),
-        "history": [
-            {
-                "role": msg["role"],
-                "content": msg["content"],
-                "timestamp": msg["timestamp"].isoformat()
-            }
-            for msg in history
-        ]
-    }
