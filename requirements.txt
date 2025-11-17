@@ -10,7 +10,7 @@ pydantic==2.10.6
 
 # ── AI/ML 핵심 라이브러리 ──
 # Transformers & PyTorch
-transformers==4.57.0
+transformers==4.51.3
 torch==2.8.0
 accelerate==1.10.1
 bitsandbytes==0.48.1
@@ -25,6 +25,7 @@ numpy==2.3.3
 # ── 한국어 NLP ──
 konlpy==0.6.0
 nltk==3.9.1
+kss==6.1.1  # Kanana Safeguard용 (한국어 문장 분리)
 
 # ── 크롤링 & 웹 스크래핑 ──
 beautifulsoup4==4.12.3
