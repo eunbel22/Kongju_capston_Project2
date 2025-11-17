@@ -28,7 +28,7 @@ MODEL_CONFIG = {
         'max_new_tokens': 512,
         'temperature': 0.7,
         'top_p': 0.9,
-        'repetition_penalty': 1.1,
+        'repetition_penalty': 1.1, #숫자up 반복 방지
     }
 }
 
