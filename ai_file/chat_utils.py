@@ -24,7 +24,7 @@ def replace_synonyms(text):
     return text
 
 # 프로젝트 구조에 따라 경로 조정
-SMALL_TALK_PATH = os.path.join(os.path.dirname(__file__), "small_talk.json")
+SMALL_TALK_PATH = os.path.join(os.path.dirname(__file__), "data", "small_talk.json")
 
 # 1) JSON에서 매핑 로드
 try:
