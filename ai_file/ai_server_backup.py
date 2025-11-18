@@ -14,7 +14,7 @@ from chat_utils import (
     save_log,
     extract_keywords
 )
-from embedding_utils import load_embed_model, embed_texts
+from ai_file.models.embedding_utils import load_embed_model, embed_texts
 from llm_utils import generate_answer_qwen, load_llm  # ← 수정: generate_answer_qwen 추가
 from data_utils import load_paragraphs, prepare_faiss
 from config import (

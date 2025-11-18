@@ -28,7 +28,7 @@ MODEL_CONFIG = {
         'max_new_tokens': 512,
         'temperature': 0.7,
         'top_p': 0.9,
-        'repetition_penalty': 1.1, #숫자up 반복 방지
+        'repetition_penalty': 1.1,
     }
 }
 
@@ -58,16 +58,21 @@ SERVER_CONFIG = {
 }
 
 # ──────────────────────────────────────────────────────────
-# 파일 경로 설정
+# 파일 경로 설정 (✅ 수정됨)
 # ──────────────────────────────────────────────────────────
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-DATA_PATH = os.path.join(PROJECT_ROOT, "split_results_two.json")
-SHUTTLE_PATH = os.path.join(PROJECT_ROOT, "shuttlebus.json")
-EMBED_PATH = os.path.join(PROJECT_ROOT, "embeddings.npy")
-INDEX_PATH = os.path.join(PROJECT_ROOT, "faiss.index")
-PROFANITY_PATH = os.path.join(PROJECT_ROOT, "profanity.json")
-SMALL_TALK_PATH = os.path.join(PROJECT_ROOT, "small_talk.json")
+# data/ 디렉토리의 파일들
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+DATA_PATH = os.path.join(DATA_DIR, "split_results_two.json")
+SHUTTLE_PATH = os.path.join(DATA_DIR, "shuttlebus.json")
+PROFANITY_PATH = os.path.join(DATA_DIR, "profanity.json")
+SMALL_TALK_PATH = os.path.join(DATA_DIR, "small_talk.json")
+
+# models/ 디렉토리의 파일들
+MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
+EMBED_PATH = os.path.join(MODELS_DIR, "embeddings.npy")
+INDEX_PATH = os.path.join(MODELS_DIR, "faiss.index")
 
 # ──────────────────────────────────────────────────────────
 # 크롤링 서버 설정
@@ -89,7 +94,7 @@ RAG_CONFIG = {
 LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
 
 # ──────────────────────────────────────────────────────────
-# 비속어 필터 설정 (🆕 추가)
+# 비속어 필터 설정
 # ──────────────────────────────────────────────────────────
 # GPU 감지
 IS_SERVER = torch.cuda.is_available()
@@ -128,4 +133,13 @@ if __name__ == "__main__":
     print(f"임베딩 모델: {EMBED_MODEL_NAME}")
     print(f"서버 설정: {SERVER_CONFIG[ENVIRONMENT]}")
     print(f"비속어 필터: {'Kanana Safeguard' if USE_AI_SAFEGUARD else 'JSON'}")
+    print("=" * 60)
+    print("\n📁 파일 경로:")
+    print(f"  - DATA_PATH: {DATA_PATH}")
+    print(f"  - SHUTTLE_PATH: {SHUTTLE_PATH}")
+    print(f"  - PROFANITY_PATH: {PROFANITY_PATH}")
+    print(f"  - SMALL_TALK_PATH: {SMALL_TALK_PATH}")
+    print(f"  - EMBED_PATH: {EMBED_PATH}")
+    print(f"  - INDEX_PATH: {INDEX_PATH}")
+    print(f"  - LOG_DIR: {LOG_DIR}")
     print("=" * 60)
