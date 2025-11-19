@@ -80,38 +80,63 @@ def is_small_talk(user_input: str) -> str | None:
     return None
 
 
+# ========== ✅ 새로 추가: 문단 길이 제한 함수 ==========
+def truncate_paragraph(content, max_length=2000):
+    """
+    문단이 너무 길면 자르기
+    
+    Args:
+        content: 원본 문단 내용
+        max_length: 최대 글자 수 (기본 2000자)
+    
+    Returns:
+        잘린 문단 (필요시 "...(생략)" 추가)
+    """
+    if len(content) <= max_length:
+        return content
+    
+    # 문장 단위로 자르기 시도
+    sentences = content.split('.')
+    truncated = ""
+    
+    for sentence in sentences:
+        if len(truncated) + len(sentence) + 1 <= max_length:
+            truncated += sentence + "."
+        else:
+            break
+    
+    # 문장 단위로 안 되면 글자 수로 자르기
+    if not truncated:
+        truncated = content[:max_length]
+    
+    return truncated + "...(생략)"
 
 
-
-
-
+# ========== ✅ 최종 수정: 한국어 강제 + 초단순 프롬프트 ==========
 def build_prompt(user_input, matched_paragraphs):
+    """
+    RAG 프롬프트 생성 (✅ 초간결 버전)
+    """
     normalized_question = replace_synonyms(user_input)
-    combined_context = "\n".join([p.get("content", "") for p in matched_paragraphs])
-    policy_text = """
-[정책 및 지침 예시]
-- 다른 대학교 언급 금지
-- 위치 정보 정확히 사용할 것
-  * 천안캠퍼스: 충청남도 천안시 서북구 천안대로 1223-24(부대동 275
-  * 예산캠퍼스: 충청남도 예산군 예산읍 대학로 54(대회리1)
-  * 본교(공주캠퍼스): 충청남도 공주시 공주대학로 56(신관동 182)
-- 도서관 운영시간은 24시간이 아니야
-"""
+    
+    # ✅ 첫 번째 문단만 사용
+    if not matched_paragraphs:
+        context = ""
+    else:
+        context = matched_paragraphs[0].get("content", "")
+        # 너무 길면 자르기 (1500자)
+        if len(context) > 1500:
+            context = context[:1500] + "..."
+    
+    # ✅ 극도로 단순한 프롬프트
+    prompt = f"""정보: {context}
 
-    prompt = f"""당신은 공주대학교에 관한 질문에만 답변하는 전문 AI입니다.
+질문: {normalized_question}
 
-[관련 문단]
-{combined_context}
-
-{policy_text}
-
-[질문]
-{normalized_question} 
-
-[답변]
-"""
+위 정보로 질문에 한국어로 1-2문장만 답하세요.
+답변:"""
+    
     return prompt
-
 
 okt = Okt()
 
@@ -170,6 +195,11 @@ def save_log(
         for i, para in enumerate(matched_paragraphs):
             para_text = para.get("content", "")
             para_category = para.get("category", "")
+            
+            # ✅ 로그에도 긴 문단은 잘라서 기록 (500자)
+            para_text_for_log = truncate_paragraph(para_text, max_length=500)
+            
+            # 원본으로 임베딩 생성
             para_embedding = embed_texts([para_text], tokenizer, model)[0].reshape(1, -1)
             dot_product = np.dot(query_embedding, para_embedding.T)
             norm_query = np.linalg.norm(query_embedding)
@@ -179,7 +209,7 @@ def save_log(
             )
             log_entry += (
                 f"문단 {i+1} (유사도: {similarity[0][0]:.3f}, "
-                f"카테고리: {para_category}):\n{para_text}\n\n"
+                f"카테고리: {para_category}):\n{para_text_for_log}\n\n"
             )
 
         log_entry += f"[답변]\n{answer}\n"

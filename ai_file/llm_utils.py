@@ -36,11 +36,10 @@ def load_llm(model_name=LLM_MODEL_NAME):
 
 def generate_answer_qwen(prompt, tokenizer, model):
     """
-    Qwen 모델로 답변 생성
-    config.py에서 환경별 파라미터 자동 적용
+    Qwen 모델로 답변 생성 (✅ chat template 사용)
     
     Args:
-        prompt: 질문 프롬프트
+        prompt: RAG 프롬프트 (chat_utils.py에서 생성)
         tokenizer: Qwen 토크나이저
         model: Qwen 모델
     
@@ -53,15 +52,28 @@ def generate_answer_qwen(prompt, tokenizer, model):
     top_p = CURRENT_CONFIG['top_p']
     repetition_penalty = CURRENT_CONFIG['repetition_penalty']
     
-    friendly_prompt = f"""당신은 공주대학교 정보를 제공하는 AI 챗봇 포티입니다.
-말투는 친절하고 따뜻하게, 이모지를 적절히 사용하여 응답해주세요.
-
-{prompt}
-"""
-    
     try:
-        # 입력 토크나이징
-        inputs = tokenizer(friendly_prompt, return_tensors="pt").to(model.device)
+        # ✅ Qwen용 chat template 사용
+        messages = [
+            {
+                "role": "system",
+                "content": "당신은 공주대학교 정보를 제공하는 AI입니다. 질문에 한국어로 간단명료하게 1-2문장으로만 답변하세요."
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ]
+        
+        # Chat template 적용
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
+        # 토크나이징
+        inputs = tokenizer([text], return_tensors="pt").to(model.device)
         
         # 답변 생성
         with torch.no_grad():
@@ -74,20 +86,31 @@ def generate_answer_qwen(prompt, tokenizer, model):
                 pad_token_id=tokenizer.eos_token_id,
                 eos_token_id=tokenizer.eos_token_id,
                 repetition_penalty=repetition_penalty,
-                early_stopping=True  # 🆕 추가: 답변 완료 시 즉시 중단
             )
         
         # 입력 부분 제거하고 답변만 디코딩
+        generated_ids = outputs[0][inputs.input_ids.shape[1]:]
+        
         response = tokenizer.decode(
-            outputs[0][inputs['input_ids'].shape[1]:], 
-            skip_special_tokens=True
+            generated_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True
         )
         
-        return response.strip()
+        # 간단한 후처리
+        response = response.strip()
+        
+        # 응답이 비어있으면 기본 메시지
+        if not response or len(response) < 3:
+            return "정보를 찾을 수 없습니다."
+        
+        return response
         
     except Exception as e:
         print(f"[ERROR] LLM 답변 생성 실패: {e}")
-        return f"[❌ 답변 생성 중 오류 발생: {str(e)}]"
+        import traceback
+        traceback.print_exc()
+        return "답변 생성 중 오류가 발생했습니다."
 
 
 # 하위 호환성을 위한 별칭 (기존 코드에서 generate_answer_ollama 호출하는 부분 대응)
@@ -97,5 +120,5 @@ def generate_answer_ollama(prompt, tokenizer=None, model=None):
     주의: tokenizer와 model을 반드시 전달해야 함
     """
     if tokenizer is None or model is None:
-        return "[❌ 오류: LLM 모델이 초기화되지 않았습니다]"
+        return "오류: LLM 모델이 초기화되지 않았습니다"
     return generate_answer_qwen(prompt, tokenizer, model)
