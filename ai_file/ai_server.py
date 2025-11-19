@@ -1,3 +1,4 @@
+#ai_server.py
 import os
 import json
 import re
@@ -21,7 +22,7 @@ from llm_utils import generate_answer_qwen, load_llm
 from data_utils import load_paragraphs, prepare_faiss
 from profanity_filter import contains_profanity
 from config import (
-    DATA_PATH,
+    DATA_FILES,
     SHUTTLE_PATH,
     EMBED_PATH,
     INDEX_PATH,
@@ -106,9 +107,27 @@ HELP_RESPONSE = (
 )
 
 print("[초기화] 데이터 로딩 중...")
-data = load_paragraphs(DATA_PATH)
+
+# 여러 파일 병합
+data = []
+for path in DATA_FILES:
+    paragraphs = load_paragraphs(path)
+    data.extend(paragraphs)
+
 tokenizer, model = load_embed_model()
-index = prepare_faiss(data, DATA_PATH, EMBED_PATH, INDEX_PATH, tokenizer, model)
+
+# 가장 최근 파일 기준으로 임베딩 업데이트
+main_json_path = DATA_FILES[0]
+
+index = prepare_faiss(
+    data,
+    main_json_path,   # json 최신 수정 시간 체크용
+    EMBED_PATH,
+    INDEX_PATH,
+    tokenizer,
+    model
+)
+
 print("[초기화] RAG 시스템 준비 완료!")
 
 print("[초기화] LLM 모델 로딩 중...")
@@ -369,32 +388,43 @@ async def chat(request: Request, body: ChatRequest):
                  tokenizer=tokenizer, model=model, client_ip=request.client.host)
         return {"response": answer}
 
+    # ========== ✅ RAG 검색 부분 (수정됨) ==========
     q_emb = embed_texts([user_message], tokenizer, model)[0]
     _, idxs = index.search(q_emb.reshape(1, -1), 3)
     matched = [data[i] for i in idxs[0] if i < len(data)]
 
     keywords = extract_keywords(user_message)
     if keywords:
-        matched = [p for p in matched if any(kw in p.get("content", "") for kw in keywords)]
+        matched = [
+            p for p in matched
+            if any(kw.replace(" ", "") in p.get("content", "").replace(" ", "")
+                for kw in keywords)
+        ]
 
-    sims = []
+    # ✅ 유사도 계산 및 필터링 강화
+    matched_with_sim = []
     for p in matched:
         p_emb = embed_texts([p.get("content", "")], tokenizer, model)[0]
         sim = np.dot(q_emb, p_emb) / (np.linalg.norm(q_emb) * np.linalg.norm(p_emb) + 1e-9)
-        sims.append(sim)
+        matched_with_sim.append((p, sim))
+    
+    # ✅ 유사도 0.5 이상만 사용 (0.45 → 0.5)
+    matched = [p for p, sim in matched_with_sim if sim >= 0.5]
+    sims = [sim for p, sim in matched_with_sim if sim >= 0.5]
     max_sim = max(sims) if sims else 0.0
 
-    if not matched or max_sim < 0.45:
+    if not matched or max_sim < 0.5:
         answer = CANNED_RESPONSE
         add_to_history(session_id, "assistant", answer)
         return {"response": answer}
 
-    prompt = build_prompt(user_message, matched)
+    # ✅ 가장 관련성 높은 첫 번째 문단만 사용
+    prompt = build_prompt(user_message, [matched[0]])
     answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
     add_to_history(session_id, "assistant", answer)
 
     client_ip = get_client_ip(request)
-    save_log(user_input=user_message, matched_paragraphs=matched, answer=answer,
+    save_log(user_input=user_message, matched_paragraphs=[matched[0]], answer=answer,
              tokenizer=tokenizer, model=model, client_ip=client_ip)
 
     return {"response": answer}

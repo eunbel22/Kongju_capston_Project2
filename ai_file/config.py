@@ -18,17 +18,17 @@ ENVIRONMENT = os.getenv('DEPLOY_ENV', 'development')  # 'development' or 'produc
 MODEL_CONFIG = {
     'development': {
         'model_name': 'Qwen/Qwen2.5-3B-Instruct',
-        'max_new_tokens': 64,
+        'max_new_tokens': 128,
         'temperature': 0.7,
         'top_p': 0.9,
-        'repetition_penalty': 1.1,
+        'repetition_penalty': 1.3,
     },
     'production': {
         'model_name': 'Qwen/Qwen2.5-7B-Instruct',
         'max_new_tokens': 512,
         'temperature': 0.7,
         'top_p': 0.9,
-        'repetition_penalty': 1.1,
+        'repetition_penalty': 1.3,
     }
 }
 
@@ -60,14 +60,26 @@ SERVER_CONFIG = {
 # ──────────────────────────────────────────────────────────
 # 파일 경로 설정 (✅ 수정됨)
 # ──────────────────────────────────────────────────────────
+
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# data/ 디렉토리의 파일들
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
-DATA_PATH = os.path.join(DATA_DIR, "split_results_two.json")
-SHUTTLE_PATH = os.path.join(DATA_DIR, "shuttlebus.json")
-PROFANITY_PATH = os.path.join(DATA_DIR, "profanity.json")
-SMALL_TALK_PATH = os.path.join(DATA_DIR, "small_talk.json")
+# datas 디렉토리
+DATAS_DIR = os.path.join(PROJECT_ROOT, "datas")
+
+# datas/output
+DATAS_OUTPUT_DIR = os.path.join(DATAS_DIR, "output")
+
+DATA_FILES = [
+    os.path.join(DATAS_OUTPUT_DIR, "merged_all_results.json"),
+]
+
+# 기타 JSON 파일
+SHUTTLE_PATH = os.path.join(DATAS_DIR, "shuttlebus.json")
+PROFANITY_PATH = os.path.join(DATAS_DIR, "profanity.json")
+SMALL_TALK_PATH = os.path.join(DATAS_DIR, "small_talk.json")
+
+
+
 
 # models/ 디렉토리의 파일들
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
@@ -135,7 +147,6 @@ if __name__ == "__main__":
     print(f"비속어 필터: {'Kanana Safeguard' if USE_AI_SAFEGUARD else 'JSON'}")
     print("=" * 60)
     print("\n📁 파일 경로:")
-    print(f"  - DATA_PATH: {DATA_PATH}")
     print(f"  - SHUTTLE_PATH: {SHUTTLE_PATH}")
     print(f"  - PROFANITY_PATH: {PROFANITY_PATH}")
     print(f"  - SMALL_TALK_PATH: {SMALL_TALK_PATH}")
