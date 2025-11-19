@@ -15,7 +15,8 @@ from chat_utils import (
     is_small_talk,
     build_prompt,
     save_log,
-    extract_keywords
+    extract_keywords,
+    expand_pronouns_with_history
 )
 from embedding_utils import load_embed_model, embed_texts
 from llm_utils import generate_answer_qwen, load_llm
@@ -388,12 +389,28 @@ async def chat(request: Request, body: ChatRequest):
                  tokenizer=tokenizer, model=model, client_ip=request.client.host)
         return {"response": answer}
 
-    # ========== ✅ RAG 검색 부분 (수정됨) ==========
-    q_emb = embed_texts([user_message], tokenizer, model)[0]
+    # ========== ✅ RAG 검색 부분 (대화 히스토리 + 대명사 확장) ==========
+
+    # ✅ 1. 대화 히스토리 가져오기
+    history = get_history(session_id, max_turns=2)  # 최근 2턴
+
+    # ✅ 2. 대명사를 실제 단어로 확장 ("거기" → "천안캠퍼스")
+    expanded_message = expand_pronouns_with_history(user_message, history)
+
+    # 🔍 디버그 로그 추가
+    if expanded_message != user_message:
+        print(f"[RAG] 원본: {user_message}")
+        print(f"[RAG] 확장: {expanded_message}")
+
+    # ✅ 3. 확장된 메시지로 임베딩 검색
+    q_emb = embed_texts([expanded_message], tokenizer, model)[0]
     _, idxs = index.search(q_emb.reshape(1, -1), 3)
     matched = [data[i] for i in idxs[0] if i < len(data)]
 
-    keywords = extract_keywords(user_message)
+    # ✅ 4. 키워드 필터링
+    keywords = extract_keywords(expanded_message)  # 확장된 메시지로 키워드 추출
+    print(f"[RAG] 추출 키워드: {keywords}")  # 🔍 키워드 로그
+
     if keywords:
         matched = [
             p for p in matched
@@ -401,31 +418,40 @@ async def chat(request: Request, body: ChatRequest):
                 for kw in keywords)
         ]
 
-    # ✅ 유사도 계산 및 필터링 강화
+    # ✅ 5. 유사도 계산 및 필터링
     matched_with_sim = []
     for p in matched:
         p_emb = embed_texts([p.get("content", "")], tokenizer, model)[0]
         sim = np.dot(q_emb, p_emb) / (np.linalg.norm(q_emb) * np.linalg.norm(p_emb) + 1e-9)
         matched_with_sim.append((p, sim))
-    
-    # ✅ 유사도 0.5 이상만 사용 (0.45 → 0.5)
+
+    # ✅ 유사도 0.5 이상만 사용
     matched = [p for p, sim in matched_with_sim if sim >= 0.5]
     sims = [sim for p, sim in matched_with_sim if sim >= 0.5]
     max_sim = max(sims) if sims else 0.0
 
+    # 🔍 유사도 로그 추가
+    if matched:
+        print(f"[RAG] 최고 유사도: {max_sim:.3f}")
+        print(f"[RAG] 매칭 문단 수: {len(matched)}")
+    else:
+        print(f"[RAG] 매칭 실패 (최고 유사도: {max_sim:.3f})")
+
+    # ✅ 6. 매칭 실패 시 기본 응답
     if not matched or max_sim < 0.5:
         answer = CANNED_RESPONSE
         add_to_history(session_id, "assistant", answer)
         return {"response": answer}
 
-    # ✅ 가장 관련성 높은 첫 번째 문단만 사용
-    prompt = build_prompt(user_message, [matched[0]])
+    # ✅ 7. 프롬프트 생성 및 답변 (원본 메시지 사용)
+    prompt = build_prompt(user_message, [matched[0]], conversation_history=history)
     answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
     add_to_history(session_id, "assistant", answer)
 
+    # ✅ 8. 로그 저장
     client_ip = get_client_ip(request)
     save_log(user_input=user_message, matched_paragraphs=[matched[0]], answer=answer,
-             tokenizer=tokenizer, model=model, client_ip=client_ip)
+            tokenizer=tokenizer, model=model, client_ip=client_ip)
 
     return {"response": answer}
 

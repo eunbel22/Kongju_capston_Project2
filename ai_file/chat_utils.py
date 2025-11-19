@@ -24,7 +24,7 @@ def replace_synonyms(text):
     return text
 
 # 프로젝트 구조에 따라 경로 조정
-SMALL_TALK_PATH = os.path.join(os.path.dirname(__file__), "data", "small_talk.json")
+SMALL_TALK_PATH = os.path.join(os.path.dirname(__file__), "datas", "small_talk.json")
 
 # 1) JSON에서 매핑 로드
 try:
@@ -80,6 +80,79 @@ def is_small_talk(user_input: str) -> str | None:
     return None
 
 
+# ========== ✅ 개선된 대명사 확장 함수 (조사 처리 추가) ==========
+def expand_pronouns_with_history(user_input: str, conversation_history: list) -> str:
+    """
+    대명사를 이전 대화 맥락으로 확장
+    
+    예: "거기서 뭐 배워?" + 이전 대화(소프트웨어학과) → "소프트웨어학과에서 뭐 배워?"
+    """
+    if not conversation_history or len(conversation_history) < 2:
+        return user_input
+    
+    # 대명사 패턴 (확장)
+    pronouns = ["거기", "그거", "그곳", "여기", "이거", "저기", "그것", "그때", "그날"]
+    
+    # 대명사가 없으면 그대로 반환
+    if not any(p in user_input for p in pronouns):
+        return user_input
+    
+    # 최근 대화에서 명사 추출 (최근 3턴 = 6개 메시지)
+    recent_messages = conversation_history[-6:]
+    
+    # 주요 키워드 찾기 (우선순위: 복합명사 > 단일명사)
+    keywords = []
+    for msg in recent_messages:
+        content = msg.get("content", "")
+        
+        # 1️⃣ 캠퍼스명 우선 (가장 구체적)
+        for campus in ["공주캠퍼스", "천안캠퍼스", "예산캠퍼스"]:
+            if campus in content:
+                keywords.append(campus)
+        
+        # 2️⃣ 복합명사 패턴 (학과, 건물명 등)
+        patterns = [
+            r'([가-힣]+캠퍼스)',
+            r'([가-힣]+학과)',
+            r'([가-힣]+전공)',
+            #r'([가-힣]+대학)',
+            r'([가-힣]+관)',
+            r'([가-힣]+도서관)',
+            r'([가-힣]+센터)',
+        ]
+        for pattern in patterns:
+            matches = re.findall(pattern, content)
+            keywords.extend(matches)
+        
+        # 3️⃣ 지역명 백업 (복합명사가 없을 때)
+        if not keywords:
+            for location in ["공주", "천안", "예산"]:
+                if location in content:
+                    keywords.append(location)
+    
+    if not keywords:
+        return user_input
+    
+    # 중복 제거 + 길이순 정렬 (긴 것 = 더 구체적)
+    keywords_unique = sorted(set(keywords), key=lambda x: len(x), reverse=True)
+    main_keyword = keywords_unique[0]  # 가장 긴(구체적인) 키워드 선택
+    
+    # 🔧 대명사 + 조사를 키워드로 교체
+    expanded = user_input
+    for pronoun in pronouns:
+        # 대명사 + 조사 패턴 매칭 (서, 는, 가, 을, 를, 에, 도, 의, 와, 과, 로 등)
+        pattern = f"{pronoun}[서는가을를에도의와과로부터까지만]?"
+        if re.search(pattern, expanded):
+            expanded = re.sub(pattern, main_keyword, expanded)
+            print(f"[대명사 확장] '{user_input}' → '{expanded}'")
+            break
+        elif pronoun in expanded:
+            expanded = expanded.replace(pronoun, main_keyword)
+            print(f"[대명사 확장] '{user_input}' → '{expanded}'")
+            break
+    
+    return expanded
+
 # ========== ✅ 새로 추가: 문단 길이 제한 함수 ==========
 def truncate_paragraph(content, max_length=2000):
     """
@@ -112,10 +185,15 @@ def truncate_paragraph(content, max_length=2000):
     return truncated + "...(생략)"
 
 
-# ========== ✅ 최종 수정: 한국어 강제 + 초단순 프롬프트 ==========
-def build_prompt(user_input, matched_paragraphs):
+# ========== ✅ 대화 히스토리 통합 프롬프트 ==========
+def build_prompt(user_input, matched_paragraphs, conversation_history=None):
     """
-    RAG 프롬프트 생성 (✅ 초간결 버전)
+    RAG 프롬프트 생성 (✅ 대화 히스토리 통합)
+    
+    Args:
+        user_input: 현재 사용자 질문
+        matched_paragraphs: 검색된 문단들
+        conversation_history: 최근 대화 히스토리 (optional)
     """
     normalized_question = replace_synonyms(user_input)
     
@@ -128,8 +206,24 @@ def build_prompt(user_input, matched_paragraphs):
         if len(context) > 1500:
             context = context[:1500] + "..."
     
-    # ✅ 극도로 단순한 프롬프트
-    prompt = f"""정보: {context}
+    # ✅ 대화 히스토리가 있으면 포함
+    if conversation_history and len(conversation_history) > 0:
+        history_text = "\n이전 대화:\n"
+        for msg in conversation_history[-4:]:  # 최근 2턴 (4개 메시지)
+            role = "사용자" if msg["role"] == "user" else "포티"
+            history_text += f"{role}: {msg['content']}\n"
+        
+        prompt = f"""정보: {context}
+
+{history_text}
+
+현재 질문: {normalized_question}
+
+위 정보와 이전 대화를 참고하여 질문에 한국어로 1-2문장만 답하세요.
+답변:"""
+    else:
+        # 히스토리 없으면 기존 방식
+        prompt = f"""정보: {context}
 
 질문: {normalized_question}
 
@@ -137,6 +231,7 @@ def build_prompt(user_input, matched_paragraphs):
 답변:"""
     
     return prompt
+
 
 okt = Okt()
 
