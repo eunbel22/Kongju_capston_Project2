@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from collections import defaultdict
 import torch
+from config import USE_MILVUS, MILVUS_CONFIG
 
 from chat_utils import (
     is_small_talk,
@@ -31,6 +32,23 @@ from config import (
     CRAWL_BASE_URL,
     ENVIRONMENT
 )
+
+# ai_server.py 상단 (35번 라인 근처)
+
+if USE_MILVUS:
+    from milvus_utils import get_milvus_client
+    print("[초기화] Milvus 모드 활성화")
+    try:
+        milvus_client = get_milvus_client()
+        if milvus_client is None:
+            print("[경고] Milvus 연결 실패, FAISS로 폴백")
+            USE_MILVUS = False  # ← 자동으로 FAISS 모드로 전환
+    except Exception as e:
+        print(f"[경고] Milvus 초기화 실패: {e}")
+        print("[경고] FAISS 모드로 폴백")
+        USE_MILVUS = False
+else:
+    print("[초기화] FAISS 모드 (기존)")
 
 app = FastAPI(title="공주대학교 AI 서버", version="1.0.0", debug=True)
 
@@ -389,66 +407,110 @@ async def chat(request: Request, body: ChatRequest):
                  tokenizer=tokenizer, model=model, client_ip=request.client.host)
         return {"response": answer}
 
+    # ai_server.py의 RAG 검색 부분 (400번 라인 근처) 수정
+
     # ========== ✅ RAG 검색 부분 (대화 히스토리 + 대명사 확장) ==========
 
     # ✅ 1. 대화 히스토리 가져오기
-    history = get_history(session_id, max_turns=2)  # 최근 2턴
+    history = get_history(session_id, max_turns=2)
 
-    # ✅ 2. 대명사를 실제 단어로 확장 ("거기" → "천안캠퍼스")
+    # ✅ 2. 대명사를 실제 단어로 확장
     expanded_message = expand_pronouns_with_history(user_message, history)
 
-    # 🔍 디버그 로그 추가
+    # 🔍 디버그 로그
     if expanded_message != user_message:
         print(f"[RAG] 원본: {user_message}")
         print(f"[RAG] 확장: {expanded_message}")
 
-    # ✅ 3. 확장된 메시지로 임베딩 검색
+    # ✅ 3. 확장된 메시지로 임베딩 생성
     q_emb = embed_texts([expanded_message], tokenizer, model)[0]
-    _, idxs = index.search(q_emb.reshape(1, -1), 3)
-    matched = [data[i] for i in idxs[0] if i < len(data)]
 
-    # ✅ 4. 키워드 필터링
-    keywords = extract_keywords(expanded_message)  # 확장된 메시지로 키워드 추출
-    print(f"[RAG] 추출 키워드: {keywords}")  # 🔍 키워드 로그
-
-    if keywords:
-        matched = [
-            p for p in matched
-            if any(kw.replace(" ", "") in p.get("content", "").replace(" ", "")
-                for kw in keywords)
-        ]
-
-    # ✅ 5. 유사도 계산 및 필터링
-    matched_with_sim = []
-    for p in matched:
-        p_emb = embed_texts([p.get("content", "")], tokenizer, model)[0]
-        sim = np.dot(q_emb, p_emb) / (np.linalg.norm(q_emb) * np.linalg.norm(p_emb) + 1e-9)
-        matched_with_sim.append((p, sim))
-
-    # ✅ 유사도 0.5 이상만 사용
-    matched = [p for p, sim in matched_with_sim if sim >= 0.5]
-    sims = [sim for p, sim in matched_with_sim if sim >= 0.5]
-    max_sim = max(sims) if sims else 0.0
-
-    # 🔍 유사도 로그 추가
-    if matched:
-        print(f"[RAG] 최고 유사도: {max_sim:.3f}")
-        print(f"[RAG] 매칭 문단 수: {len(matched)}")
+    # ✅ 4. Milvus 또는 FAISS 검색
+    if USE_MILVUS:
+        # 🆕 Milvus 검색
+        try:
+            matched = milvus_client.search(q_emb, top_k=3)
+            print(f"[Milvus] 검색 완료: {len(matched)}개 결과")
+        except Exception as e:
+            print(f"[Milvus] 검색 실패: {e}")
+            answer = CANNED_RESPONSE
+            add_to_history(session_id, "assistant", answer)
+            return {"response": answer}
     else:
-        print(f"[RAG] 매칭 실패 (최고 유사도: {max_sim:.3f})")
+        # 기존 FAISS 검색
+        # 차원 검증 추가
+        if q_emb.shape[0] != index.d:
+            print(f"[CRITICAL ERROR] 차원 불일치!")
+            print(f"  Expected: {index.d}, Got: {q_emb.shape[0]}")
+            answer = CANNED_RESPONSE
+            add_to_history(session_id, "assistant", answer)
+            return {"response": answer}
+        
+        _, idxs = index.search(q_emb.reshape(1, -1), 3)
+        matched = [data[i] for i in idxs[0] if i < len(data)]
 
-    # ✅ 6. 매칭 실패 시 기본 응답
+    # ✅ 5. 키워드 필터링
+    keywords = extract_keywords(expanded_message)
+    print(f"[RAG] 추출 키워드: {keywords}")
+
+    if USE_MILVUS:
+        # Milvus는 이미 유사도로 정렬되어 있음
+        # 키워드 필터링 (선택적)
+        if keywords:
+            matched = [
+                p for p in matched
+                if any(kw.replace(" ", "") in p.get("content", "").replace(" ", "")
+                    for kw in keywords)
+            ]
+    else:
+        # FAISS 키워드 필터링
+        if keywords:
+            matched = [
+                p for p in matched
+                if any(kw.replace(" ", "") in p.get("content", "").replace(" ", "")
+                    for kw in keywords)
+            ]
+
+    # ✅ 6. 유사도 확인
+    if USE_MILVUS:
+        # Milvus는 score 필드에 유사도 있음
+        if matched:
+            max_sim = max([p.get("score", 0) for p in matched])
+            print(f"[Milvus] 최고 유사도: {max_sim:.3f}")
+            print(f"[Milvus] 매칭 문단 수: {len(matched)}")
+        else:
+            max_sim = 0.0
+            print(f"[Milvus] 매칭 실패")
+    else:
+        # FAISS 유사도 계산 (기존 코드)
+        matched_with_sim = []
+        for p in matched:
+            p_emb = embed_texts([p.get("content", "")], tokenizer, model)[0]
+            sim = np.dot(q_emb, p_emb) / (np.linalg.norm(q_emb) * np.linalg.norm(p_emb) + 1e-9)
+            matched_with_sim.append((p, sim))
+        
+        matched = [p for p, sim in matched_with_sim if sim >= 0.5]
+        sims = [sim for p, sim in matched_with_sim if sim >= 0.5]
+        max_sim = max(sims) if sims else 0.0
+        
+        if matched:
+            print(f"[RAG] 최고 유사도: {max_sim:.3f}")
+            print(f"[RAG] 매칭 문단 수: {len(matched)}")
+        else:
+            print(f"[RAG] 매칭 실패 (최고 유사도: {max_sim:.3f})")
+
+    # ✅ 7. 매칭 실패 시 기본 응답
     if not matched or max_sim < 0.5:
         answer = CANNED_RESPONSE
         add_to_history(session_id, "assistant", answer)
         return {"response": answer}
 
-    # ✅ 7. 프롬프트 생성 및 답변 (원본 메시지 사용)
+    # ✅ 8. 프롬프트 생성 및 답변
     prompt = build_prompt(user_message, [matched[0]], conversation_history=history)
     answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
     add_to_history(session_id, "assistant", answer)
 
-    # ✅ 8. 로그 저장
+    # ✅ 9. 로그 저장
     client_ip = get_client_ip(request)
     save_log(user_input=user_message, matched_paragraphs=[matched[0]], answer=answer,
             tokenizer=tokenizer, model=model, client_ip=client_ip)

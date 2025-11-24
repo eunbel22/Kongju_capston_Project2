@@ -154,3 +154,28 @@ if __name__ == "__main__":
     print(f"  - INDEX_PATH: {INDEX_PATH}")
     print(f"  - LOG_DIR: {LOG_DIR}")
     print("=" * 60)
+
+    # config.py 맨 아래에 추가
+
+# ──────────────────────────────────────────────────────────
+# Milvus 설정 (✅ 새로 추가)
+# ──────────────────────────────────────────────────────────
+# 맨 아래 추가
+# config.py
+
+# config.py
+
+# ──────────────────────────────────────────────────────────
+# Milvus 설정 (✅ 최종 수정)
+# ──────────────────────────────────────────────────────────
+MILVUS_CONFIG = {
+    'host': os.getenv('MILVUS_HOST', '10.37.21.49'),  # ← 변경!
+    'port': 19530,
+    'collection_name': 'porty_kongju_docs',  # ← 변경!
+    'vector_dim': 384,
+    'vector_field': 'embedding',  # ← vector → embedding
+    'metric_type': 'COSINE',
+}
+
+USE_MILVUS = os.getenv('USE_MILVUS', 'false').lower() == 'true'
+
