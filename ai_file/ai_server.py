@@ -17,7 +17,9 @@ from chat_utils import (
     build_prompt,
     save_log,
     extract_keywords,
-    expand_pronouns_with_history
+    expand_pronouns_with_history,
+    is_casual_chat,      # 🚀 하이브리드: 일상 대화 감지
+    build_casual_prompt  
 )
 from embedding_utils import load_embed_model, embed_texts
 from llm_utils import generate_answer_qwen, load_llm
@@ -185,13 +187,7 @@ def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def is_casual_conversation(text: str) -> bool:
-    """일상 대화인지 판단"""
-    casual_patterns = [
-        "배고", "졸", "피곤", "심심", "지루", "재밌", "신나", "좋아", 
-        "사랑", "응", "그래", "알았어", "오케이", "ok", "ㅇㅋ"
-    ]
-    return any(p in text for p in casual_patterns)
+# ========== ✅ is_casual_conversation 함수 삭제 (is_casual_chat 사용) ==========
 
 
 @app.get("/api/ai/health")
@@ -228,6 +224,8 @@ async def chat(request: Request, body: ChatRequest):
     if small:
         add_to_history(session_id, "assistant", small)
         return {"response": small}
+    
+    
 
     # ========== ✅ 4. 대명사 확장 (가장 먼저!) ==========
     history = get_history(session_id, max_turns=3)
@@ -242,8 +240,10 @@ async def chat(request: Request, body: ChatRequest):
     # ✅ 이후부터는 expanded_message 사용!
     user_message = expanded_message
 
-    # ========== 5. 일상 대화 (확장된 메시지 사용) ==========
-    if is_casual_conversation(user_message):
+    # ========== 🚀 5. 일상 대화 (is_casual_chat 사용!) ==========
+    if is_casual_chat(user_message):  # ← is_casual_conversation에서 is_casual_chat으로 변경!
+        print(f"[일상 대화] 감지: {user_message}")
+        
         system_content = "당신은 공주대 학생들의 친구 포티입니다. 이전 대화를 기억하며 자연스럽게 대화하세요. 반말로 1-2문장만 짧게 답변하세요."
         
         messages = [{"role": "system", "content": system_content}]
