@@ -115,9 +115,9 @@ IS_SERVER = torch.cuda.is_available()
 if IS_SERVER:
     # 서버: Kanana Safeguard 8B 사용
     USE_AI_SAFEGUARD = True
-    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-8b'
+    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-3b'
     SAFEGUARD_DEVICE = 'cuda'
-    print("[비속어 필터] 서버 환경 감지 → Kanana Safeguard 8B (GPU) 사용")
+    print("[비속어 필터] 서버 환경 감지 → Kanana Safeguard 3B (GPU) 사용")
 else:
     # 로컬: .env 파일 설정 따름 (기본값: false)
     try:
