@@ -58,7 +58,7 @@ SERVER_CONFIG = {
 }
 
 # ──────────────────────────────────────────────────────────
-# 파일 경로 설정 (✅ 수정됨)
+# 파일 경로 설정
 # ──────────────────────────────────────────────────────────
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -77,9 +77,6 @@ DATA_FILES = [
 SHUTTLE_PATH = os.path.join(DATAS_DIR, "shuttlebus.json")
 PROFANITY_PATH = os.path.join(DATAS_DIR, "profanity.json")
 SMALL_TALK_PATH = os.path.join(DATAS_DIR, "small_talk.json")
-
-
-
 
 # models/ 디렉토리의 파일들
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
@@ -106,20 +103,21 @@ RAG_CONFIG = {
 LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
 
 # ──────────────────────────────────────────────────────────
-# 비속어 필터 설정
+# 비속어 필터 설정 (✅ 주석 수정)
 # ──────────────────────────────────────────────────────────
 # GPU 감지
 IS_SERVER = torch.cuda.is_available()
 
 # 환경별 비속어 필터 설정
 if IS_SERVER:
-    # 서버: Kanana Safeguard 8B 사용
+    # ✅ 서버: Kanana Safeguard 2.1B 사용 (GPU, 빠름)
     USE_AI_SAFEGUARD = True
-    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-3b'
+    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-2.1b'
     SAFEGUARD_DEVICE = 'cuda'
-    print("[비속어 필터] 서버 환경 감지 → Kanana Safeguard 3B (GPU) 사용")
+    print("[비속어 필터] 서버 환경 감지 → Kanana Safeguard 2.1B (GPU) 사용")
 else:
-    # 로컬: .env 파일 설정 따름 (기본값: false)
+    # ✅ 로컬: JSON 사용 (CPU에서 AI 모델은 너무 느림)
+    # .env에서 USE_AI_SAFEGUARD=true로 설정하면 AI 모델 사용 가능 (테스트용)
     try:
         from dotenv import load_dotenv
         load_dotenv()
@@ -127,13 +125,28 @@ else:
     except:
         USE_AI_SAFEGUARD = False
     
-    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-8b'
+    # AI 모델 사용 시 설정 (기본적으로는 사용 안 함)
+    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-2.1b'
     SAFEGUARD_DEVICE = 'cpu'
     
     if USE_AI_SAFEGUARD:
-        print("[비속어 필터] 로컬 환경 → Kanana Safeguard 8B (CPU) 사용")
+        print("[비속어 필터] 로컬 환경 → Kanana Safeguard 2.1B (CPU) 사용 (느릴 수 있음)")
     else:
-        print("[비속어 필터] 로컬 환경 → JSON 목록 사용")
+        print("[비속어 필터] 로컬 환경 → JSON 목록 사용 (권장)")
+
+# ──────────────────────────────────────────────────────────
+# Milvus 설정
+# ──────────────────────────────────────────────────────────
+MILVUS_CONFIG = {
+    'host': os.getenv('MILVUS_HOST', '10.37.21.49'),
+    'port': 19530,
+    'collection_name': 'porty_kongju_docs',
+    'vector_dim': 384,
+    'vector_field': 'embedding',
+    'metric_type': 'COSINE',
+}
+
+USE_MILVUS = os.getenv('USE_MILVUS', 'false').lower() == 'true'
 
 # ──────────────────────────────────────────────────────────
 # 디버그 출력
@@ -144,7 +157,9 @@ if __name__ == "__main__":
     print(f"LLM 모델: {LLM_MODEL_NAME}")
     print(f"임베딩 모델: {EMBED_MODEL_NAME}")
     print(f"서버 설정: {SERVER_CONFIG[ENVIRONMENT]}")
-    print(f"비속어 필터: {'Kanana Safeguard' if USE_AI_SAFEGUARD else 'JSON'}")
+    print(f"비속어 필터: {'Kanana Safeguard ' + SAFEGUARD_MODEL_NAME.split('/')[-1] if USE_AI_SAFEGUARD else 'JSON'}")
+    print(f"  - 모델: {SAFEGUARD_MODEL_NAME if USE_AI_SAFEGUARD else 'N/A'}")
+    print(f"  - 디바이스: {SAFEGUARD_DEVICE if USE_AI_SAFEGUARD else 'N/A'}")
     print("=" * 60)
     print("\n📁 파일 경로:")
     print(f"  - SHUTTLE_PATH: {SHUTTLE_PATH}")
@@ -154,28 +169,9 @@ if __name__ == "__main__":
     print(f"  - INDEX_PATH: {INDEX_PATH}")
     print(f"  - LOG_DIR: {LOG_DIR}")
     print("=" * 60)
-
-    # config.py 맨 아래에 추가
-
-# ──────────────────────────────────────────────────────────
-# Milvus 설정 (✅ 새로 추가)
-# ──────────────────────────────────────────────────────────
-# 맨 아래 추가
-# config.py
-
-# config.py
-
-# ──────────────────────────────────────────────────────────
-# Milvus 설정 (✅ 최종 수정)
-# ──────────────────────────────────────────────────────────
-MILVUS_CONFIG = {
-    'host': os.getenv('MILVUS_HOST', '10.37.21.49'),  # ← 변경!
-    'port': 19530,
-    'collection_name': 'porty_kongju_docs',  # ← 변경!
-    'vector_dim': 384,
-    'vector_field': 'embedding',  # ← vector → embedding
-    'metric_type': 'COSINE',
-}
-
-USE_MILVUS = os.getenv('USE_MILVUS', 'false').lower() == 'true'
-
+    print("\n🔍 Milvus 설정:")
+    print(f"  - 사용: {USE_MILVUS}")
+    if USE_MILVUS:
+        print(f"  - 호스트: {MILVUS_CONFIG['host']}:{MILVUS_CONFIG['port']}")
+        print(f"  - 컬렉션: {MILVUS_CONFIG['collection_name']}")
+    print("=" * 60)

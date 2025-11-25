@@ -80,20 +80,17 @@ def is_small_talk(user_input: str) -> str | None:
     return None
 
 
-# ========== ✅ 수정된 대명사 확장 함수 (조사 처리 개선) ==========
+# ========== ✅ 개선된 대명사 확장 함수 (조사 처리 추가) ==========
 def expand_pronouns_with_history(user_input: str, conversation_history: list) -> str:
     """
-    대명사를 이전 대화 맥락으로 확장 (조사 처리 개선)
+    대명사를 이전 대화 맥락으로 확장
     
-    예시:
-        "거기서 뭐 배워?" + 이전 대화(소프트웨어학과) → "소프트웨어학과에서 뭐 배워?"
-        "거기 학과는?" + 이전 대화(천안캠퍼스) → "천안캠퍼스 학과는?"
-        "거기에 도서관 있어?" + 이전 대화(예산캠퍼스) → "예산캠퍼스에 도서관 있어?"
+    예: "거기서 뭐 배워?" + 이전 대화(소프트웨어학과) → "소프트웨어학과에서 뭐 배워?"
     """
     if not conversation_history or len(conversation_history) < 2:
         return user_input
     
-    # 대명사 패턴
+    # 대명사 패턴 (확장)
     pronouns = ["거기", "그거", "그곳", "여기", "이거", "저기", "그것", "그때", "그날"]
     
     # 대명사가 없으면 그대로 반환
@@ -118,6 +115,7 @@ def expand_pronouns_with_history(user_input: str, conversation_history: list) ->
             r'([가-힣]+캠퍼스)',
             r'([가-힣]+학과)',
             r'([가-힣]+전공)',
+            #r'([가-힣]+대학)',
             r'([가-힣]+관)',
             r'([가-힣]+도서관)',
             r'([가-힣]+센터)',
@@ -139,46 +137,21 @@ def expand_pronouns_with_history(user_input: str, conversation_history: list) ->
     keywords_unique = sorted(set(keywords), key=lambda x: len(x), reverse=True)
     main_keyword = keywords_unique[0]  # 가장 긴(구체적인) 키워드 선택
     
-    # ✅ 수정된 부분: 대명사 + 조사를 올바르게 처리
+    # 🔧 대명사 + 조사를 키워드로 교체
     expanded = user_input
     for pronoun in pronouns:
-        if pronoun in expanded:
-            # 정규식으로 대명사 + 조사 패턴 찾기
-            # "거기서" → "천안캠퍼스에서"
-            # "거기에" → "천안캠퍼스에"
-            # "거기는" → "천안캠퍼스는"
-            expanded = re.sub(
-                rf"{pronoun}(서|에서|에|는|은|가|을|를|의|로|도|와|과|부터|까지|만)?",
-                lambda m: f"{main_keyword}{_convert_postposition(m.group(1))}",
-                expanded
-            )
-            
-            # 확장 성공하면 로그 출력
-            if expanded != user_input:
-                print(f"[대명사 확장] '{user_input}' → '{expanded}'")
-                break
+        # 대명사 + 조사 패턴 매칭 (서, 는, 가, 을, 를, 에, 도, 의, 와, 과, 로 등)
+        pattern = f"{pronoun}[서는가을를에도의와과로부터까지만]?"
+        if re.search(pattern, expanded):
+            expanded = re.sub(pattern, main_keyword, expanded)
+            print(f"[대명사 확장] '{user_input}' → '{expanded}'")
+            break
+        elif pronoun in expanded:
+            expanded = expanded.replace(pronoun, main_keyword)
+            print(f"[대명사 확장] '{user_input}' → '{expanded}'")
+            break
     
     return expanded
-
-
-def _convert_postposition(postposition: str) -> str:
-    """
-    대명사 뒤 조사를 적절하게 변환
-    
-    "거기서" → "에서" (서 → 에서)
-    "거기에" → "에" (에 → 에)
-    "거기는" → "는" (는 → 는)
-    """
-    if not postposition:
-        return ""
-    
-    # "서"는 "에서"로 변환
-    if postposition == "서":
-        return "에서"
-    
-    # 나머지는 그대로 유지
-    return postposition
-
 
 # ========== ✅ 새로 추가: 문단 길이 제한 함수 ==========
 def truncate_paragraph(content, max_length=2000):
