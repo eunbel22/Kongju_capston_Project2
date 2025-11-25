@@ -210,24 +210,40 @@ async def chat(request: Request, body: ChatRequest):
 
     add_to_history(session_id, "user", user_message)
 
+    # ========== 1. 비속어 체크 ==========
     if contains_profanity(user_message):
         print(f"[비속어 차단] 세션: {session_id}, 입력: '{user_message}'")
         answer = CANNED_RESPONSE
         add_to_history(session_id, "assistant", answer)
         return {"response": answer}
 
+    # ========== 2. 도움말 ==========
     if user_message.strip() in ("도와줘", "도움말"):
         answer = HELP_RESPONSE
         add_to_history(session_id, "assistant", answer)
         return {"response": answer}
 
+    # ========== 3. Small Talk ==========
     small = is_small_talk(user_message)
     if small:
         add_to_history(session_id, "assistant", small)
         return {"response": small}
 
+    # ========== ✅ 4. 대명사 확장 (가장 먼저!) ==========
+    history = get_history(session_id, max_turns=3)
+    expanded_message = expand_pronouns_with_history(user_message, history)
+    
+    # 디버그 로그
+    if expanded_message != user_message:
+        print(f"[대명사 확장] ✅ 성공!")
+        print(f"  원본: {user_message}")
+        print(f"  확장: {expanded_message}")
+    
+    # ✅ 이후부터는 expanded_message 사용!
+    user_message = expanded_message
+
+    # ========== 5. 일상 대화 (확장된 메시지 사용) ==========
     if is_casual_conversation(user_message):
-        history = get_history(session_id, max_turns=3)
         system_content = "당신은 공주대 학생들의 친구 포티입니다. 이전 대화를 기억하며 자연스럽게 대화하세요. 반말로 1-2문장만 짧게 답변하세요."
         
         messages = [{"role": "system", "content": system_content}]
@@ -292,12 +308,71 @@ async def chat(request: Request, body: ChatRequest):
                  tokenizer=tokenizer, model=model, client_ip=client_ip)
         return {"response": answer}
 
+    # ========== ✅ 6. 셔틀버스 (확장된 메시지 사용) ==========
     if any(kw in user_message for kw in ("셔틀", "버스")) and shuttle_data:
-        locations = re.findall(r"[가-힣]+", user_message)
-        routes = [r for r in shuttle_data["shuttle_schedules"]
-                  if any(loc in r["route"] for loc in locations)]
+        print(f"[셔틀버스] 처리 시작: {user_message}")
+        
+        # ✅ 출발지와 목적지를 구분해서 추출
+        departure = None
+        destination = None
+        
+        # 캠퍼스 매핑
+        campus_map = {
+            "천안캠퍼스": "천안", "천안공과대학": "천안", "천안": "천안",
+            "공주캠퍼스": "공주", "공주": "공주", "본교": "공주",
+            "예산캠퍼스": "예산", "예산": "예산", "산업과학대학": "예산",
+            "소프트웨어공학과": "천안", "기계공학과": "천안", "전기전자공학과": "천안",
+            "대전": "대전", "청주": "청주", "세종": "세종", "유성": "유성"
+        }
+        
+        # "에서" 앞 = 출발지
+        from_match = re.search(r"([가-힣]+)(에서|부터)", user_message)
+        if from_match:
+            place = from_match.group(1)
+            for key, value in campus_map.items():
+                if key in place:
+                    departure = value
+                    print(f"[셔틀버스] 출발지 발견: {place} → {departure}")
+                    break
+        
+        # "로/으로/까지" 앞 = 목적지
+        to_match = re.search(r"([가-힣]+)(로|으로|까지)", user_message)
+        if to_match:
+            place = to_match.group(1)
+            for key, value in campus_map.items():
+                if key in place:
+                    destination = value
+                    print(f"[셔틀버스] 목적지 발견: {place} → {destination}")
+                    break
+        
+        # 노선 매칭
+        routes = []
+        if departure and destination:
+            # 출발지→목적지 형태로 매칭
+            for r in shuttle_data["shuttle_schedules"]:
+                route_name = r["route"]
+                # "천안→공주" 형태 파싱
+                if "→" in route_name:
+                    parts = route_name.split("→")
+                    route_from = parts[0]
+                    route_to = parts[1]
+                    
+                    if departure in route_from and destination in route_to:
+                        routes.append(r)
+                        print(f"[셔틀버스] 노선 매칭 성공: {route_name}")
+                        break
+        
+        # 매칭 실패 시 키워드로 폴백
+        if not routes:
+            print(f"[셔틀버스] 출발/목적지 매칭 실패, 키워드 검색으로 폴백")
+            locations = re.findall(r"[가-힣]+", user_message)
+            routes = [r for r in shuttle_data["shuttle_schedules"]
+                      if any(loc in r["route"] for loc in locations)]
+        
         if not routes:
             routes = [shuttle_data["shuttle_schedules"][0]]
+        
+        print(f"[셔틀버스] 최종 매칭된 노선: {[r['route'] for r in routes]}")
 
         context = {"service_period": shuttle_data["service_period"], "routes": routes}
         shuttle_ctx = json.dumps(context, ensure_ascii=False)
@@ -320,6 +395,7 @@ async def chat(request: Request, body: ChatRequest):
                  tokenizer=tokenizer, model=model, client_ip=client_ip)
         return {"response": answer}
 
+    # ========== 7. 공주대 소개 ==========
     if "공주대학교에 대해 알려줘" in user_message:
         intro = (
             "안녕하세요! 공주대학교에 대해 알려드릴게요 😊\n\n"
@@ -335,6 +411,7 @@ async def chat(request: Request, body: ChatRequest):
         add_to_history(session_id, "assistant", intro)
         return {"response": intro}
 
+    # ========== 8. 식단 정보 (확장된 메시지 사용) ==========
     if any(k in user_message for k in ("메뉴", "식단", "식당", "점심", "저녁", "아침")):
         campus = "cheonan"
         mapping = {
@@ -407,27 +484,13 @@ async def chat(request: Request, body: ChatRequest):
                  tokenizer=tokenizer, model=model, client_ip=request.client.host)
         return {"response": answer}
 
-    # ai_server.py의 RAG 검색 부분 (400번 라인 근처) 수정
+    # ========== ✅ 9. RAG 검색 (이미 확장된 메시지 사용) ==========
+    # user_message는 이미 line 254에서 expanded_message로 교체됨!
+    
+    q_emb = embed_texts([user_message], tokenizer, model)[0]
 
-    # ========== ✅ RAG 검색 부분 (대화 히스토리 + 대명사 확장) ==========
-
-    # ✅ 1. 대화 히스토리 가져오기
-    history = get_history(session_id, max_turns=2)
-
-    # ✅ 2. 대명사를 실제 단어로 확장
-    expanded_message = expand_pronouns_with_history(user_message, history)
-
-    # 🔍 디버그 로그
-    if expanded_message != user_message:
-        print(f"[RAG] 원본: {user_message}")
-        print(f"[RAG] 확장: {expanded_message}")
-
-    # ✅ 3. 확장된 메시지로 임베딩 생성
-    q_emb = embed_texts([expanded_message], tokenizer, model)[0]
-
-    # ✅ 4. Milvus 또는 FAISS 검색
+    # Milvus 또는 FAISS 검색
     if USE_MILVUS:
-        # 🆕 Milvus 검색
         try:
             matched = milvus_client.search(q_emb, top_k=3)
             print(f"[Milvus] 검색 완료: {len(matched)}개 결과")
@@ -437,11 +500,9 @@ async def chat(request: Request, body: ChatRequest):
             add_to_history(session_id, "assistant", answer)
             return {"response": answer}
     else:
-        # 기존 FAISS 검색
-        # 차원 검증 추가
+        # 차원 검증
         if q_emb.shape[0] != index.d:
-            print(f"[CRITICAL ERROR] 차원 불일치!")
-            print(f"  Expected: {index.d}, Got: {q_emb.shape[0]}")
+            print(f"[오류] 임베딩 차원 불일치! Expected: {index.d}, Got: {q_emb.shape[0]}")
             answer = CANNED_RESPONSE
             add_to_history(session_id, "assistant", answer)
             return {"response": answer}
@@ -449,40 +510,36 @@ async def chat(request: Request, body: ChatRequest):
         _, idxs = index.search(q_emb.reshape(1, -1), 3)
         matched = [data[i] for i in idxs[0] if i < len(data)]
 
-    # ✅ 5. 키워드 필터링
-    keywords = extract_keywords(expanded_message)
-    print(f"[RAG] 추출 키워드: {keywords}")
+    # 키워드 필터링
+    keywords = extract_keywords(user_message)
+    print(f"[키워드] 추출됨: {keywords}")
 
     if USE_MILVUS:
-        # Milvus는 이미 유사도로 정렬되어 있음
-        # 키워드 필터링 (선택적)
         if keywords:
             matched = [
                 p for p in matched
                 if any(kw.replace(" ", "") in p.get("content", "").replace(" ", "")
                     for kw in keywords)
             ]
+            print(f"[Milvus] 키워드 필터링 후: {len(matched)}개")
     else:
-        # FAISS 키워드 필터링
         if keywords:
             matched = [
                 p for p in matched
                 if any(kw.replace(" ", "") in p.get("content", "").replace(" ", "")
                     for kw in keywords)
             ]
+            print(f"[FAISS] 키워드 필터링 후: {len(matched)}개")
 
-    # ✅ 6. 유사도 확인
+    # 유사도 확인
     if USE_MILVUS:
-        # Milvus는 score 필드에 유사도 있음
         if matched:
             max_sim = max([p.get("score", 0) for p in matched])
             print(f"[Milvus] 최고 유사도: {max_sim:.3f}")
-            print(f"[Milvus] 매칭 문단 수: {len(matched)}")
         else:
             max_sim = 0.0
-            print(f"[Milvus] 매칭 실패")
+            print(f"[Milvus] 매칭된 문단 없음")
     else:
-        # FAISS 유사도 계산 (기존 코드)
         matched_with_sim = []
         for p in matched:
             p_emb = embed_texts([p.get("content", "")], tokenizer, model)[0]
@@ -494,26 +551,35 @@ async def chat(request: Request, body: ChatRequest):
         max_sim = max(sims) if sims else 0.0
         
         if matched:
-            print(f"[RAG] 최고 유사도: {max_sim:.3f}")
-            print(f"[RAG] 매칭 문단 수: {len(matched)}")
+            print(f"[FAISS] 최고 유사도: {max_sim:.3f}, 매칭 문단 수: {len(matched)}")
         else:
-            print(f"[RAG] 매칭 실패 (최고 유사도: {max_sim:.3f})")
+            print(f"[FAISS] 매칭 실패 (최고 유사도: {max_sim:.3f})")
 
-    # ✅ 7. 매칭 실패 시 기본 응답
+    # 매칭 실패 시 기본 응답
     if not matched or max_sim < 0.5:
+        print(f"[RAG] 매칭 실패 → 기본 응답 반환")
         answer = CANNED_RESPONSE
         add_to_history(session_id, "assistant", answer)
         return {"response": answer}
 
-    # ✅ 8. 프롬프트 생성 및 답변
+    # 프롬프트 생성 및 답변
     prompt = build_prompt(user_message, [matched[0]], conversation_history=history)
     answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
+
+    print(f"[답변 생성] 완료 (길이: {len(answer)}자)")
+
     add_to_history(session_id, "assistant", answer)
 
-    # ✅ 9. 로그 저장
+    # 로그 저장
     client_ip = get_client_ip(request)
-    save_log(user_input=user_message, matched_paragraphs=[matched[0]], answer=answer,
-            tokenizer=tokenizer, model=model, client_ip=client_ip)
+    save_log(
+        user_input=user_message,
+        matched_paragraphs=[matched[0]], 
+        answer=answer,
+        tokenizer=tokenizer, 
+        model=model, 
+        client_ip=client_ip
+    )
 
     return {"response": answer}
 
