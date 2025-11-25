@@ -80,6 +80,92 @@ def is_small_talk(user_input: str) -> str | None:
     return None
 
 
+# ========== 🚀 하이브리드: 일상 대화 감지 함수 ==========
+def is_casual_chat(message: str) -> bool:
+    """
+    학교 정보와 무관한 일상 대화를 감지합니다.
+    
+    Args:
+        message: 사용자 입력 메시지
+        
+    Returns:
+        True: 일상 대화로 판단
+        False: 학교 정보 질문으로 판단
+    """
+    message = message.strip()
+    
+    # 학교 관련 키워드 (이것들이 포함되면 학교 정보 질문)
+    school_keywords = [
+        "학교", "캠퍼스", "대학", "학과", "전공", "과",
+        "교수", "수업", "강의", "학점", "시험", "과제",
+        "도서관", "식당", "학식", "기숙사", "동아리", "동방",
+        "셔틀", "버스", "일정", "공지", "신청", "등록",
+        "입학", "졸업", "학사", "휴학", "복학", "장학",
+        "건물", "위치", "어디", "시설", "운영시간",
+        "천안", "공주", "예산", "본교", "공과대학",
+        "메뉴", "식단", "아침", "점심", "저녁"
+    ]
+    
+    # 학교 키워드 포함 → 일상 대화 아님
+    if any(kw in message for kw in school_keywords):
+        return False
+    
+    # 일상 대화 패턴 키워드
+    casual_patterns = [
+        "날씨", "취미", "영화", "게임", "음악", "노래",
+        "운동", "여행", "맛집", "친구", "연애", "사랑",
+        "기분", "피곤", "졸려", "배고", "목말", "추워", "더워",
+        "심심", "재밌", "슬퍼", "화나", "행복", "우울",
+        "주말", "휴일", "방학", "집", "집에",
+        "뭐해", "어떻게", "요즘", "최근에",
+        "추천", "좋아", "싫어", "예쁘", "멋지"
+    ]
+    
+    # 일상 패턴 포함 → 일상 대화
+    if any(pat in message for pat in casual_patterns):
+        return True
+    
+    # 짧은 질문 (10자 이하) & 학교 키워드 없음 → 일상 대화
+    if len(message) <= 10 and not any(kw in message for kw in school_keywords):
+        return True
+    
+    return False
+
+
+def build_casual_prompt(message: str) -> str:
+    """
+    일상 대화를 위한 LLM 프롬프트를 생성합니다.
+    
+    Args:
+        message: 사용자 입력 메시지
+        
+    Returns:
+        LLM용 프롬프트 문자열
+    """
+    prompt = f"""당신은 공주대학교 AI 챗봇 '포티(Porty)'입니다.
+
+[포티의 성격]
+- 친근하고 밝은 20대 대학생 같은 말투
+- 이모지를 적절히 사용 (😊, 👍, 💪, 😢, 🎉 등)
+- 공주대학교 학생들을 아끼는 마음
+- 유머 감각이 있지만 예의바름
+
+[대화 규칙]
+1. 1-2문장으로 간결하게 답변 (최대 3문장)
+2. 공주대학교 관련 질문은 "제가 찾아드릴게요!" 안내
+3. 부적절한 내용은 정중히 거절
+4. 대답을 모르면 솔직히 인정
+5. 학생들에게 긍정적인 에너지 전달
+
+[사용자 메시지]
+{message}
+
+[포티의 답변]
+"""
+    return prompt
+
+
+
 # ========== ✅ 수정된 대명사 확장 함수 (조사 처리 개선) ==========
 def expand_pronouns_with_history(user_input: str, conversation_history: list) -> str:
     """

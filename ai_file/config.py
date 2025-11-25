@@ -10,8 +10,16 @@ import torch
 # ──────────────────────────────────────────────────────────
 # 환경 설정
 # ──────────────────────────────────────────────────────────
-ENVIRONMENT = os.getenv('DEPLOY_ENV', 'development')  # 'development' or 'production'
+IS_GPU_SERVER = torch.cuda.is_available()
 
+# 기존 DEPLOY_ENV 값 읽기 (로컬에서는 development 사용)
+RAW_ENV = os.getenv('DEPLOY_ENV', 'development')
+
+# GPU 서버이면 강제로 production 사용 (7B 모델 자동 로드)
+if IS_GPU_SERVER:
+    ENVIRONMENT = 'production'
+else:
+    ENVIRONMENT = RAW_ENV
 # ──────────────────────────────────────────────────────────
 # LLM 모델 설정
 # ──────────────────────────────────────────────────────────
