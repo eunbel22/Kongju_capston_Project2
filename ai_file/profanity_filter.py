@@ -4,15 +4,18 @@
 - Local: JSON 기반 (빠름)
 - Server: Kanana Safeguard 8B (정확함)
 """
-
-import json
+import torch  # ← 이 줄 추가!
 import re
+import os
+import json
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from config import (
     USE_AI_SAFEGUARD,
     SAFEGUARD_MODEL_NAME,
     SAFEGUARD_DEVICE,
     PROFANITY_PATH
 )
+
 
 # ============================================
 # JSON 기반 필터 (Local)
