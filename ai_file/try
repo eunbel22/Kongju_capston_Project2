@@ -16,7 +16,7 @@ chat 실행 예시
   "messages": [
     {
       "role": "user",
-      "content": "캠퍼스가 몇 개야?"
+      "content": "오늘 점심 뭐 먹을까?"
     }
   ]
 }

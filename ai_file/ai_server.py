@@ -378,15 +378,18 @@ async def chat(request: Request, body: ChatRequest):
         shuttle_ctx = json.dumps(context, ensure_ascii=False)
 
         prompt = f"""다음은 공주대학교 셔틀버스 운영 정보입니다:
-{shuttle_ctx}
+        {shuttle_ctx}
 
-위 정보를 참고해 아래 질문에 답해주세요.
+        [중요 규칙]
+        1. 사용자가 "시간 알려줘", "몇 시에 출발", "언제 타면 돼" 같은 질문을 하면 → 출발 시간(departure_time)을 알려주세요
+        2. 각 정류장의 도착 시간은 참고용이고, 주로 출발지의 출발 시간을 답변해야 합니다
+        3. timetable의 각 항목에서 출발지 정류장의 시간 또는 departure_time을 우선적으로 사용하세요
 
-[질문]
-{user_message}
+        [질문]
+        {user_message}
 
-[답변]
-"""
+        [답변]
+        """
         answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
         add_to_history(session_id, "assistant", answer)
         
@@ -419,6 +422,14 @@ async def chat(request: Request, body: ChatRequest):
             "은행사": "ehh", "홍익사": "ehh", "해오름": "ehh",
             "비전": "VB", "블룸": "VB",
         }
+
+        CAMPUS_KOREAN_NAMES = {
+            "cheonan": "천안",
+            "dream": "드림",
+            "yesan": "예산",
+            "ehh": "은행사",
+            "VB": "비전"
+        }
         for kr, en in mapping.items():
             if kr in user_message:
                 campus = en
@@ -444,7 +455,7 @@ async def chat(request: Request, body: ChatRequest):
                           if today in m.get("date","").strip()), None)
 
         if not today_meal:
-            answer = f"{campus.capitalize()} 캠퍼스 식단 정보가 준비되지 않았습니다."
+            answer = f"{CAMPUS_KOREAN_NAMES.get(campus, campus)} 캠퍼스 식단 정보가 준비되지 않았습니다."
             add_to_history(session_id, "assistant", answer)
             return {"response": answer}
 
@@ -466,18 +477,19 @@ async def chat(request: Request, body: ChatRequest):
             meal_type = "저녁"
 
         if meal_type == "아침":
-            answer = f"{campus.capitalize()}캠퍼스 오늘({today}) 아침 메뉴입니다:\n☀ {bf or '정보 없음'}"
+            answer = f"{CAMPUS_KOREAN_NAMES.get(campus, campus)}캠퍼스 오늘({today}) 아침 메뉴입니다:\n☀ {bf or '정보 없음'}"
         elif meal_type == "점심":
-            answer = f"{campus.capitalize()}캠퍼스 오늘({today}) 점심 메뉴입니다:\n🌤 {lf or '정보 없음'}"
+            answer = f"{CAMPUS_KOREAN_NAMES.get(campus, campus)}캠퍼스 오늘({today}) 점심 메뉴입니다:\n🌤 {lf or '정보 없음'}"
         elif meal_type == "저녁":
-            answer = f"{campus.capitalize()}캠퍼스 오늘({today}) 저녁 메뉴입니다:\n🌙 {dn or '정보 없음'}"
+            answer = f"{CAMPUS_KOREAN_NAMES.get(campus, campus)}캠퍼스 오늘({today}) 저녁 메뉴입니다:\n🌙 {dn or '정보 없음'}"
         else:
             answer = (
-                f"{campus.capitalize()} 캠퍼스 오늘({today}) 식단입니다:\n\n"
+                f"{CAMPUS_KOREAN_NAMES.get(campus, campus)} 캠퍼스 오늘({today}) 식단입니다:\n\n"
                 f"☀ 아침: {bf or '정보 없음'}\n"
                 f"🌤 점심: {lf or '정보 없음'}\n"
                 f"🌙 저녁: {dn or '정보 없음'}"
             )
+
 
         add_to_history(session_id, "assistant", answer)
         save_log(user_input=user_message, matched_paragraphs=[], answer=answer,
