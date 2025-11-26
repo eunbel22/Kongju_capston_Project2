@@ -151,7 +151,7 @@ MILVUS_CONFIG = {
     'collection_name': 'porty_kongju_docs',
     'vector_dim': 384,
     'vector_field': 'embedding',
-    'metric_type': 'COSINE',
+    'metric_type': 'IP',
 }
 
 USE_MILVUS = os.getenv('USE_MILVUS', 'false').lower() == 'true'
