@@ -1,8 +1,9 @@
 # profanity_filter.py
 """
-비속어 필터링 시스템
+비속어 필터링 시스템 (✅ 완화 버전)
 - Local: JSON 기반 (빠름)
 - Server: Kanana Safeguard 8B (정확함, Classification 전용)
+- ✅ 수정사항: threshold 0.5 → 0.7, 안전 키워드 우선 통과
 """
 import torch
 import re
@@ -99,13 +100,14 @@ def load_safeguard_model():
         return None, None
 
 
-def contains_profanity_ai(text: str, threshold: float = 0.5) -> bool:
+def contains_profanity_ai(text: str, threshold: float = 0.7) -> bool:
     """
     AI 모델 기반 비속어 감지 (Classification)
+    ✅ 수정사항: threshold 0.5 → 0.7 (완화)
     
     Args:
         text: 검사할 텍스트
-        threshold: 유해 판정 임계값 (0.5 = 50% 확률 이상이면 유해)
+        threshold: 유해 판정 임계값 (0.7 = 70% 확률 이상이면 유해)
     
     Returns:
         True: 유해한 텍스트
@@ -114,6 +116,34 @@ def contains_profanity_ai(text: str, threshold: float = 0.5) -> bool:
     global safeguard_model, safeguard_tokenizer
     
     if safeguard_model is None or safeguard_tokenizer is None:
+        return False
+    
+    # ✅ 1단계: 안전한 학교 관련 키워드 미리 필터링
+    safe_patterns = [
+        # 날씨 관련
+        "날씨", "기온", "온도", "습도", "미세먼지", "강수량",
+        
+        # 학교 시설
+        "도서관", "식당", "학식", "기숙사", "캠퍼스", "건물", "강의실",
+        
+        # 학사 관련
+        "학과", "전공", "수업", "강의", "시험", "과제", "학점", "졸업",
+        "입학", "등록", "신청", "장학금", "휴학", "복학",
+        
+        # 일상 표현
+        "운동", "운영시간", "위치", "어디", "언제", "몇시", "시간",
+        "메뉴", "식단", "아침", "점심", "저녁", "조식", "중식", "석식",
+        
+        # 교통
+        "셔틀", "버스", "통학", "교통", "주차",
+        
+        # 기타 안전 표현
+        "동물원", "박물관", "문화", "행사", "축제", "대회", "공연",
+        "교수", "선생", "직원", "학생", "친구", "동아리"
+    ]
+    
+    if any(pattern in text for pattern in safe_patterns):
+        print(f"[비속어 필터] ✅ 안전 키워드 감지, 통과: {text[:30]}")
         return False
     
     try:
@@ -139,9 +169,10 @@ def contains_profanity_ai(text: str, threshold: float = 0.5) -> bool:
         
         is_harmful = harmful_prob >= threshold
         
-        # 디버그 로그
-        if is_harmful:
-            print(f"[비속어 감지] '{text[:30]}...' → 유해 확률: {harmful_prob:.2%}")
+        # 디버그 로그 (임계값 근처만 출력)
+        if harmful_prob >= 0.5:  # ✅ 50% 이상일 때만 로그
+            status = "🚫 차단" if is_harmful else "✅ 통과"
+            print(f"[비속어 감지] {status} | '{text[:30]}...' → 유해 확률: {harmful_prob:.2%}")
         
         return is_harmful
         
