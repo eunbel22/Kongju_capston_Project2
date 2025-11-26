@@ -53,11 +53,19 @@ def generate_answer_qwen(prompt, tokenizer, model):
     repetition_penalty = CURRENT_CONFIG['repetition_penalty']
     
     try:
-        # ✅ Qwen용 chat template 사용
+        # ✅ Qwen용 chat template 사용 + 강화된 한국어 전용 시스템 프롬프트
         messages = [
             {
                 "role": "system",
-                "content": "당신은 공주대학교 정보를 제공하는 AI입니다. 질문에 한국어로 간단명료하게 1-2문장으로만 답변하세요."
+                "content": """당신은 공주대학교 정보를 제공하는 AI 챗봇입니다.
+
+[절대 규칙]
+1. 반드시 한국어로만 답변하세요.
+2. 중국어, 영어, 일본어 등 어떤 외국어도 절대 사용하지 마세요.
+3. 사용자가 외국어로 질문해도 한국어로만 답변하세요.
+4. 한 문장도 외국어로 작성하지 마세요.
+
+질문에 간단명료하게 1-2문장으로 답변하세요."""
             },
             {
                 "role": "user", 

@@ -546,8 +546,8 @@ async def chat(request: Request, body: ChatRequest):
             sim = np.dot(q_emb, p_emb) / (np.linalg.norm(q_emb) * np.linalg.norm(p_emb) + 1e-9)
             matched_with_sim.append((p, sim))
         
-        matched = [p for p, sim in matched_with_sim if sim >= 0.5]
-        sims = [sim for p, sim in matched_with_sim if sim >= 0.5]
+        matched = [p for p, sim in matched_with_sim if sim >= 0.4]
+        sims = [sim for p, sim in matched_with_sim if sim >= 0.4]
         max_sim = max(sims) if sims else 0.0
         
         if matched:
@@ -556,7 +556,7 @@ async def chat(request: Request, body: ChatRequest):
             print(f"[FAISS] 매칭 실패 (최고 유사도: {max_sim:.3f})")
 
     # 매칭 실패 시 기본 응답
-    if not matched or max_sim < 0.5:
+    if not matched or max_sim < 0.4:
         print(f"[RAG] 매칭 실패 → 기본 응답 반환")
         answer = CANNED_RESPONSE
         add_to_history(session_id, "assistant", answer)
