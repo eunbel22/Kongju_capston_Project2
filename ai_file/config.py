@@ -27,16 +27,16 @@ MODEL_CONFIG = {
     'development': {
         'model_name': 'Qwen/Qwen2.5-3B-Instruct',
         'max_new_tokens': 128,
-        'temperature': 0.7,
+        'temperature': 0.3,  
         'top_p': 0.9,
-        'repetition_penalty': 1.3,
+        'repetition_penalty': 1.1,
     },
     'production': {
         'model_name': 'Qwen/Qwen2.5-7B-Instruct',
         'max_new_tokens': 512,
-        'temperature': 0.7,
+        'temperature': 0.3,  
         'top_p': 0.9,
-        'repetition_penalty': 1.3,
+        'repetition_penalty': 1.1,
     }
 }
 
