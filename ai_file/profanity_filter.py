@@ -2,9 +2,9 @@
 """
 비속어 필터링 시스템
 - Local: JSON 기반 (빠름)
-- Server: Kanana Safeguard 8B (정확함)
+- Server: Kanana Safeguard 8B (정확함, Classification 전용)
 """
-import torch  # ← 이 줄 추가!
+import torch
 import re
 import os
 import json
@@ -41,14 +41,14 @@ def contains_profanity_json(text: str, profanity_list: list) -> bool:
 
 
 # ============================================
-# AI 모델 기반 필터 (Server)
+# AI 모델 기반 필터 (Server) - 8B Classification
 # ============================================
 
 safeguard_model = None
 safeguard_tokenizer = None
 
 def load_safeguard_model():
-    """Kanana Safeguard 8B 모델 로드 (4-bit 양자화)"""
+    """Kanana Safeguard 8B 모델 로드 (4-bit 양자화, Classification 전용)"""
     global safeguard_model, safeguard_tokenizer
     
     if not USE_AI_SAFEGUARD:
@@ -57,11 +57,10 @@ def load_safeguard_model():
     if safeguard_model is not None:
         return safeguard_tokenizer, safeguard_model
     
-    print(f"[비속어 필터] Kanana Safeguard 모델 로딩 중... ({SAFEGUARD_DEVICE})")
+    print(f"[비속어 필터] Kanana Safeguard 8B 모델 로딩 중... ({SAFEGUARD_DEVICE})")
     
     try:
-        from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-        import torch
+        from transformers import BitsAndBytesConfig
         
         # 4-bit 양자화 설정
         quantization_config = BitsAndBytesConfig(
@@ -74,8 +73,8 @@ def load_safeguard_model():
         safeguard_tokenizer = AutoTokenizer.from_pretrained(SAFEGUARD_MODEL_NAME)
         
         if SAFEGUARD_DEVICE == 'cuda':
-            # GPU: 4-bit 양자화 사용
-            safeguard_model = AutoModelForCausalLM.from_pretrained(
+            # ✅ GPU: Classification 모델로 로드 (CausalLM 아님!)
+            safeguard_model = AutoModelForSequenceClassification.from_pretrained(
                 SAFEGUARD_MODEL_NAME,
                 device_map="auto",
                 quantization_config=quantization_config,
@@ -84,13 +83,14 @@ def load_safeguard_model():
             )
         else:
             # CPU: 양자화 없이 로드 (느림)
-            safeguard_model = AutoModelForCausalLM.from_pretrained(
+            safeguard_model = AutoModelForSequenceClassification.from_pretrained(
                 SAFEGUARD_MODEL_NAME,
                 trust_remote_code=True
             )
             safeguard_model = safeguard_model.to(SAFEGUARD_DEVICE)
         
-        print(f"[비속어 필터] Kanana Safeguard 로드 완료! ({SAFEGUARD_DEVICE})")
+        safeguard_model.eval()  # ✅ 평가 모드로 전환
+        print(f"[비속어 필터] Kanana Safeguard 8B 로드 완료! ({SAFEGUARD_DEVICE})")
         return safeguard_tokenizer, safeguard_model
         
     except Exception as e:
@@ -99,35 +99,51 @@ def load_safeguard_model():
         return None, None
 
 
-def contains_profanity_ai(text: str) -> bool:
-    """AI 모델 기반 비속어 감지"""
+def contains_profanity_ai(text: str, threshold: float = 0.5) -> bool:
+    """
+    AI 모델 기반 비속어 감지 (Classification)
+    
+    Args:
+        text: 검사할 텍스트
+        threshold: 유해 판정 임계값 (0.5 = 50% 확률 이상이면 유해)
+    
+    Returns:
+        True: 유해한 텍스트
+        False: 안전한 텍스트
+    """
     global safeguard_model, safeguard_tokenizer
     
     if safeguard_model is None or safeguard_tokenizer is None:
         return False
     
     try:
-        # Kanana Safeguard 프롬프트 형식
-        prompt = f"다음 텍스트에 비속어나 유해한 표현이 있는지 판단하세요.\n\n텍스트: {text}\n\n판단:"
+        # ✅ 텍스트 토크나이징 (프롬프트 없이 직접 입력)
+        inputs = safeguard_tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+            padding=True
+        ).to(SAFEGUARD_DEVICE)
         
-        inputs = safeguard_tokenizer(prompt, return_tensors="pt").to(SAFEGUARD_DEVICE)
-        
+        # ✅ 분류 수행 (generate 아님!)
         with torch.no_grad():
-            outputs = safeguard_model.generate(
-                **inputs,
-                max_new_tokens=10,
-                temperature=0.1,
-                do_sample=False
-            )
+            outputs = safeguard_model(**inputs)
+            logits = outputs.logits
+            
+            # 소프트맥스로 확률 변환
+            probabilities = torch.softmax(logits, dim=-1)
+            
+            # ✅ Label 0 = 안전, Label 1 = 유해
+            harmful_prob = probabilities[0][1].item()
         
-        result = safeguard_tokenizer.decode(
-            outputs[0][inputs['input_ids'].shape[1]:],
-            skip_special_tokens=True
-        ).strip().lower()
+        is_harmful = harmful_prob >= threshold
         
-        # "예", "yes", "유해", "비속어" 등의 키워드로 판단
-        harmful_keywords = ["예", "yes", "유해", "비속어", "부적절"]
-        return any(kw in result for kw in harmful_keywords)
+        # 디버그 로그
+        if is_harmful:
+            print(f"[비속어 감지] '{text[:30]}...' → 유해 확률: {harmful_prob:.2%}")
+        
+        return is_harmful
         
     except Exception as e:
         print(f"[ERROR] Safeguard 모델 실행 실패: {e}")

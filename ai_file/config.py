@@ -118,11 +118,11 @@ IS_SERVER = torch.cuda.is_available()
 
 # 환경별 비속어 필터 설정
 if IS_SERVER:
-    # ✅ 서버: Kanana Safeguard 2.1B 사용 (GPU, 빠름)
+    # ✅ 서버: Kanana Safeguard 8B 사용 (GPU, 빠름)
     USE_AI_SAFEGUARD = True
-    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-2.1b'
+    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-8b'
     SAFEGUARD_DEVICE = 'cuda'
-    print("[비속어 필터] 서버 환경 감지 → Kanana Safeguard 2.1B (GPU) 사용")
+    print("[비속어 필터] 서버 환경 감지 → Kanana Safeguard 8B (GPU) 사용")
 else:
     # ✅ 로컬: JSON 사용 (CPU에서 AI 모델은 너무 느림)
     # .env에서 USE_AI_SAFEGUARD=true로 설정하면 AI 모델 사용 가능 (테스트용)
@@ -134,11 +134,11 @@ else:
         USE_AI_SAFEGUARD = False
     
     # AI 모델 사용 시 설정 (기본적으로는 사용 안 함)
-    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-2.1b'
+    SAFEGUARD_MODEL_NAME = 'kakaocorp/kanana-safeguard-8b'
     SAFEGUARD_DEVICE = 'cpu'
     
     if USE_AI_SAFEGUARD:
-        print("[비속어 필터] 로컬 환경 → Kanana Safeguard 2.1B (CPU) 사용 (느릴 수 있음)")
+        print("[비속어 필터] 로컬 환경 → Kanana Safeguard 8B (CPU) 사용 (느릴 수 있음)")
     else:
         print("[비속어 필터] 로컬 환경 → JSON 목록 사용 (권장)")
 
