@@ -7,6 +7,26 @@ from config import LLM_MODEL_NAME, CURRENT_CONFIG, ENVIRONMENT
 print(f"[환경] {ENVIRONMENT} 모드로 실행 중")
 print(f"[모델] {LLM_MODEL_NAME} 사용")
 
+
+def fix_encoding_errors(text: str) -> str:
+    """LLM 출력에서 인코딩 오류 교정"""
+    error_patterns = {
+        "캠�ßer": "캠퍼스",
+        "캠ßer": "캠퍼스",
+        "캠�": "캠퍼스",
+        "�ßer": "퍼스",
+        "ßer": "퍼스",
+        "대학�": "대학교",
+        "학�": "학교",
+    }
+    
+    for wrong, correct in error_patterns.items():
+        if wrong in text:
+            print(f"[인코딩 교정] '{wrong}' → '{correct}'")
+            text = text.replace(wrong, correct)
+    
+    return text
+
 def load_llm(model_name=LLM_MODEL_NAME):
     """
     Qwen 2.5 모델 로드 (4-bit 양자화)
@@ -137,6 +157,8 @@ Answer concisely in 1-2 sentences in KOREAN."""
         
         # 후처리
         response = response.strip()
+
+        response = fix_encoding_errors(response)
         
         # ✅ 4단계 방어: 외국어 감지 시 재시도 또는 필터링
         if has_foreign_language(response):

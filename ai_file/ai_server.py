@@ -165,6 +165,29 @@ class ChatRequest(BaseModel):
     sessionId: Optional[str] = None
     messages: List[ChatMessage]
 
+def is_location_query(text: str) -> bool:
+    """위치 질문인지 판단"""
+    location_keywords = ["어디", "위치", "주소", "찾아가", "가는", "길"]
+    return any(kw in text for kw in location_keywords)
+
+def filter_location_paragraphs(matched: list, query: str) -> list:
+    """위치 질문일 때 위치 정보 문단만 선택"""
+    if not is_location_query(query):
+        return matched
+    
+    location_info_keywords = ["주소", "위치", "소재", "번지", "캠퍼스"]
+    exclude_keywords = ["열람실", "도서관", "식당", "운영시간"]
+    
+    location_docs = []
+    for p in matched:
+        content = p.get("content", "")
+        if any(ex in content for ex in exclude_keywords):
+            continue
+        if any(kw in content for kw in location_info_keywords):
+            location_docs.append(p)
+    
+    return location_docs if location_docs else matched
+
 
 def get_client_ip(request: Request) -> str:
     """실제 클라이언트 IP를 추출하는 함수"""
@@ -309,8 +332,64 @@ async def chat(request: Request, body: ChatRequest):
         return {"response": answer}
 
     # ========== ✅ 6. 셔틀버스 (확장된 메시지 사용) ==========
-    if any(kw in user_message for kw in ("셔틀", "버스")) and shuttle_data:
+ 
+    # 🚀 반대노선 키워드 & 셔틀버스 컨텍스트 판단
+    shuttle_keywords = ["셔틀", "버스"]
+    reverse_keywords = ["반대", "역방향", "돌아", "거꾸로"]
+    
+    # 이전 대화에 셔틀버스 언급이 있었는지 확인
+    history_mentions_shuttle = any(
+        "셔틀" in msg.get("content", "") or "버스" in msg.get("content", "")
+        for msg in history[-6:]  # 최근 3턴 (6개 메시지)
+    )
+    
+    # 셔틀버스 질문 판단: (1) 직접 키워드 or (2) 반대노선 키워드 + 이전 대화 컨텍스트
+    is_shuttle_query = (
+        any(kw in user_message for kw in shuttle_keywords) or
+        (any(kw in user_message for kw in reverse_keywords) and history_mentions_shuttle)
+    )
+    
+    if is_shuttle_query and shuttle_data:
         print(f"[셔틀버스] 처리 시작: {user_message}")
+        
+        # 🚀 반대노선 감지
+        is_reverse_query = any(kw in user_message for kw in reverse_keywords)
+        
+        if is_reverse_query:
+            print(f"[셔틀버스] 반대노선 질문 감지")
+            # 이전 대화에서 노선 정보 찾기
+            found_route = False
+            for msg in reversed(history):
+                content = msg.get("content", "")
+                
+                # 1순위: "공주→천안" 형태
+                route_match = re.search(r"(공주|천안|예산)→(공주|천안|예산)", content)
+                if route_match:
+                    from_campus = route_match.group(1)
+                    to_campus = route_match.group(2)
+                    previous_route = f"{to_campus}→{from_campus}"
+                    print(f"[셔틀버스] 이전 노선: {from_campus}→{to_campus}")
+                    print(f"[셔틀버스] 반대 노선: {previous_route}")
+                    user_message = f"{previous_route} 셔틀버스 시간 알려줘"
+                    print(f"[셔틀버스] 확장된 질문: {user_message}")
+                    found_route = True
+                    break
+                
+                # 2순위: "공주캠퍼스에서 천안캠퍼스로" 형태
+                text_match = re.search(r"(공주|천안|예산)[가-힣]*에서\s*(공주|천안|예산)[가-힣]*로", content)
+                if text_match:
+                    from_campus = text_match.group(1)
+                    to_campus = text_match.group(2)
+                    previous_route = f"{to_campus}→{from_campus}"
+                    print(f"[셔틀버스] 텍스트에서 노선 추출: {from_campus}→{to_campus}")
+                    print(f"[셔틀버스] 반대 노선: {previous_route}")
+                    user_message = f"{previous_route} 셔틀버스 시간 알려줘"
+                    print(f"[셔틀버스] 확장된 질문: {user_message}")
+                    found_route = True
+                    break
+            
+            if not found_route:
+                print(f"[셔틀버스] 경고: 이전 대화에서 노선 정보를 찾을 수 없음")
         
         # ✅ 출발지와 목적지를 구분해서 추출
         departure = None
@@ -377,19 +456,41 @@ async def chat(request: Request, body: ChatRequest):
         context = {"service_period": shuttle_data["service_period"], "routes": routes}
         shuttle_ctx = json.dumps(context, ensure_ascii=False)
 
-        prompt = f"""다음은 공주대학교 셔틀버스 운영 정보입니다:
-        {shuttle_ctx}
+        # 🚀 대화 히스토리 포함 (반대노선 질문일 때)
+        history_text = ""
+        if is_reverse_query and history:
+            history_text = "\n[이전 대화 맥락]\n"
+            for msg in history[-4:]:
+                role = "사용자" if msg["role"] == "user" else "포티"
+                history_text += f"{role}: {msg['content']}\n"
+            history_text += "\n"
 
-        [중요 규칙]
-        1. 사용자가 "시간 알려줘", "몇 시에 출발", "언제 타면 돼" 같은 질문을 하면 → 출발 시간(departure_time)을 알려주세요
-        2. 각 정류장의 도착 시간은 참고용이고, 주로 출발지의 출발 시간을 답변해야 합니다
-        3. timetable의 각 항목에서 출발지 정류장의 시간 또는 departure_time을 우선적으로 사용하세요
+        prompt = f"""당신은 공주대학교 셔틀버스 정보를 알려주는 친절한 AI 포티입니다.
 
-        [질문]
-        {user_message}
+【참고 데이터】
+{shuttle_ctx}
+{history_text}
 
-        [답변]
-        """
+【답변 규칙】
+1. 위 JSON의 timetable에 있는 departure_time 값만 사용하세요
+2. JSON에 없는 시간이나 노선은 절대 만들어내지 마세요
+3. 질문한 노선(route)과 정확히 일치하는 시간표만 참고하세요
+4. 친근하고 자연스러운 말투로 답변하되, 시간은 정확히 전달하세요
+
+【답변 형식 가이드】
+- "A에서 B로" 질문 시:
+  1) 출발지(A)의 출발 시간을 먼저 나열
+  2) 목적지(B)의 도착 시간을 함께 제시
+  3) 경유지는 특별히 요청하지 않으면 생략
+  
+- 예시: "공주→천안" 질문
+  → "공주에서 08:00, 09:00, 17:00, 18:10에 출발해요. 천안캠퍼스에는 08:50, 09:50, 17:50, 19:00에 도착합니다~"
+
+【질문】
+{user_message}
+
+【답변】
+"""
         answer = generate_answer_qwen(prompt, llm_tokenizer, llm_model)
         add_to_history(session_id, "assistant", answer)
         
@@ -397,7 +498,6 @@ async def chat(request: Request, body: ChatRequest):
         save_log(user_input=user_message, matched_paragraphs=[], answer=answer,
                  tokenizer=tokenizer, model=model, client_ip=client_ip)
         return {"response": answer}
-
     # ========== 7. 공주대 소개 ==========
     if "공주대학교에 대해 알려줘" in user_message:
         intro = (
@@ -542,6 +642,8 @@ async def chat(request: Request, body: ChatRequest):
                     for kw in keywords)
             ]
             print(f"[FAISS] 키워드 필터링 후: {len(matched)}개")
+
+    matched = filter_location_paragraphs(matched, user_message)    
 
     # 유사도 확인
     if USE_MILVUS:

@@ -99,7 +99,8 @@ def is_casual_chat(message: str) -> bool:
         "학교", "캠퍼스", "대학", "학과", "전공", "과",
         "교수", "수업", "강의", "학점", "시험", "과제",
         "도서관", "식당", "학식", "기숙사", "동아리", "동방",
-        "셔틀", "버스", "일정", "공지", "신청", "등록",
+        "셔틀", "버스", "노선",
+        "일정", "공지", "신청", "등록",
         "입학", "졸업", "학사", "휴학", "복학", "장학",
         "건물", "위치", "어디", "시설", "운영시간",
         "천안", "공주", "예산", "본교", "공과대학",
@@ -229,15 +230,23 @@ def expand_pronouns_with_history(user_input: str, conversation_history: list) ->
     expanded = user_input
     for pronoun in pronouns:
         if pronoun in expanded:
+            # 🚀 수정: "거기 도서관" → "천안캠퍼스 도서관" (중복 방지)
             # 정규식으로 대명사 + 조사 패턴 찾기
-            # "거기서" → "천안캠퍼스에서"
-            # "거기에" → "천안캠퍼스에"
-            # "거기는" → "천안캠퍼스는"
             expanded = re.sub(
-                rf"{pronoun}(서|에서|에|는|은|가|을|를|의|로|도|와|과|부터|까지|만)?",
-                lambda m: f"{main_keyword}{_convert_postposition(m.group(1))}",
+                rf"{pronoun}(서|에서|에|는|은|가|을|를|의|로|도|와|과|부터|까지|만)?(\s+)",
+                lambda m: f"{main_keyword}{_convert_postposition(m.group(1))}{m.group(2)}",
                 expanded
             )
+            
+            # 조사 없이 바로 명사가 오는 경우 (예: "거기 도서관")
+            # → 대명사만 교체하고 뒤 명사는 유지
+            if expanded == user_input:
+                # "거기 XXX" 패턴에서 거기만 교체
+                expanded = re.sub(
+                    rf"{pronoun}(\s+)([가-힣]+)",
+                    lambda m: f"{main_keyword}{m.group(1)}{m.group(2)}",
+                    expanded
+                )
             
             # 확장 성공하면 로그 출력
             if expanded != user_input:
